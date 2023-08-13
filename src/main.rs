@@ -74,6 +74,19 @@ fn main() -> ! {
 
     let mut ws = Ws2812::new(spi);
 
+    const NUM_LEDS: usize = 1;
+    const DELAY_MS : u32 = 5 * 1000;
+
+    let data = [WHITE; NUM_LEDS];
+
+    loop {
+        ws.write(data.iter().cloned()).unwrap();
+        println!("Wrote");
+        delay.delay_ms(DELAY_MS);
+    }
+
+    
+
     // loop {
     //     match bno055.is_fully_calibrated() {
     //         Ok(true) => println!("orientation sensor is fully calibrated"),
@@ -85,15 +98,4 @@ fn main() -> ! {
     //     let mut buf = [0_u8; 1];
     //     uart1.read(&mut buf, BLOCK).unwrap();
     // }
-
-    const NUM_LEDS: usize = 1;
-    const DELAY_MS : u32 = 5 * 1000;
-
-    let data = [WHITE; NUM_LEDS];
-
-    loop {
-        ws.write(data.iter().cloned()).unwrap();
-        println!("Wrote");
-        delay.delay_ms(DELAY_MS);
-    }
 }
