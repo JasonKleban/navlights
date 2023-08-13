@@ -3,10 +3,17 @@
 
 use esp_backtrace as _;
 use esp_println::println;
-use hal::{clock::ClockControl, peripherals::Peripherals, prelude::*, timer::TimerGroup, Rtc, spi, IO, Delay};
+use hal::{
+    clock::ClockControl, i2c, peripherals::Peripherals, prelude::*, spi, timer::TimerGroup, Delay,
+    Rtc, Uart, IO,
+};
 
-use smart_leds::{RGB, RGB8, colors::{ORANGE, BLUE}, SmartLedsWrite};
+use smart_leds::{
+    colors::{BLUE, ORANGE, WHITE},
+    SmartLedsWrite, RGB, RGB8,
+};
 use ws2812_spi::Ws2812;
+use bno055;
 
 #[entry]
 fn main() -> ! {
@@ -33,21 +40,33 @@ fn main() -> ! {
     rtc.rwdt.disable();
     wdt0.disable();
     wdt1.disable();
-    
-    let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-        
-    let sclk = io.pins.gpio12;
-    let miso = io.pins.gpio11;
-    let mosi = io.pins.gpio13;
-    let cs = io.pins.gpio10;
 
-    let spi = hal::spi::Spi::new(
-        peripherals.SPI2, 
-        sclk,
-        mosi,
-        miso,
-        cs,
+    let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+
+    let sda = io.pins.gpio6;
+    let scl = io.pins.gpio7;
+
+    let i2c0 = i2c::I2C::new(
+        peripherals.I2C0,
+        sda,
+        scl,
         100u32.kHz(),
+        &mut system.peripheral_clock_control,
+        &clocks,
+    );
+
+    let mut bno055 = bno055::Bno055::new(i2c0);
+
+    // GPS Data
+    let uart1 = Uart::new(peripherals.UART1, &mut system.peripheral_clock_control);
+
+    // Led strip data
+    let mosi = io.pins.gpio10;
+
+    let spi = hal::spi::Spi::new_mosi_only(
+        peripherals.SPI2,
+        mosi,
+        3_333_333u32.Hz(),
         spi::SpiMode::Mode0,
         &mut system.peripheral_clock_control,
         &clocks,
@@ -55,28 +74,26 @@ fn main() -> ! {
 
     let mut ws = Ws2812::new(spi);
 
-    const NUM_LEDS: usize = 10;
-    const DELAY_SECONDS: u32 = 30;
+    // loop {
+    //     match bno055.is_fully_calibrated() {
+    //         Ok(true) => println!("orientation sensor is fully calibrated"),
+    //         Ok(false) => println!("orientation sensor is not fully calibrated"),
+    //         Err(e) => println!("error with orientation sensor: {e:?}"),
+    //     }
+
+    //     // Recieve GPS Message Value
+    //     let mut buf = [0_u8; 1];
+    //     uart1.read(&mut buf, BLOCK).unwrap();
+    // }
+
+    const NUM_LEDS: usize = 1;
+    const DELAY_MS : u32 = 5 * 1000;
+
+    let data = [WHITE; NUM_LEDS];
 
     loop {
-        println!("Hello world!");
-
-        let first_rgb: RGB8 = ORANGE;
-        let second_rgb: RGB8 = BLUE;
-
-        let mut data: [RGB<u8>; 10] = [first_rgb; NUM_LEDS];
-
         ws.write(data.iter().cloned()).unwrap();
-
-        for i in 0..NUM_LEDS {
-            delay.delay_ms(DELAY_SECONDS);
-            data[i] = second_rgb;
-            ws.write(data.iter().cloned()).unwrap();
-        }
-        for i in 0..NUM_LEDS {
-            delay.delay_ms(DELAY_SECONDS);
-            data[i] = first_rgb;
-            ws.write(data.iter().cloned()).unwrap();
-        }
+        println!("Wrote");
+        delay.delay_ms(DELAY_MS);
     }
 }
