@@ -28,6 +28,9 @@ navLightWidth = 8
 degreesToRadians = math.pi / 180.0
 radiansToDegrees = 180.0 / math.pi
 
+fakeAccelEast = 0.0
+fakeAccelNorth = 0.0
+
 def dull(r, g, b):
     return (int(brightness * r), int(brightness * g), int(brightness * b)) 
 
@@ -92,6 +95,7 @@ def getReadLoop():
         datetime = None
         headed = None
         speedEstimate = bearingEstimate = 0.0
+        gpsDataUpdated = False
 
         while True:            
             try:                
@@ -153,25 +157,31 @@ def getReadLoop():
                         velocityNorthMs += (accelNorthMs2 * deltaS)
                         velocityEastMs += (accelEastMs2 * deltaS)
 
-                        angleRadians = math.atan2(velocityEastMs, velocityNorthMs)
+                        angleRadians = math.atan2((velocityNorthMs + fakeAccelNorth), (velocityEastMs + fakeAccelEast))
 
-                        speedEstimate = math.sqrt(velocityEastMs * velocityEastMs + velocityNorthMs * velocityNorthMs)
+                        speedEstimate = math.sqrt((velocityEastMs + fakeAccelEast) * (velocityEastMs + fakeAccelEast) + (velocityNorthMs + fakeAccelNorth) * (velocityNorthMs + fakeAccelNorth))
 
-                        bearingEstimate = None if speedEstimate < 1.0 else (450.0 - (angleRadians * radiansToDegrees)) % 360
+                        bearingEstimate = None if abs(speedEstimate) < 0.5 else (450.0 + (angleRadians * radiansToDegrees)) % 360
 
                         # print('{:+0.1f}m North, {:+0.1f}m East'.format(displacementNorthM, displacementEastM))
                         
-                        if bearingEstimate is not None:
-                            print('Bearing {:05.1f}º at {: 3.1f} m/s. Heading {:05.1f}º'
-                                .format(
-                                    bearingEstimate,
-                                    speedEstimate,
-                                    heading));
-                        else:
-                            print('Bearing -----º at {: 3.1f} m/s. Heading {:05.1f}º'
-                                .format(
-                                    speedEstimate,
-                                    heading));
+                        # print('{: 3.1f} m/s'.format(speedEstimate))
+
+                        if utime.ticks_ms() % 5 == 0:
+                            if bearingEstimate is not None:
+                                print('Bearing {:05.1f}º at {: 3.1f} m/s. Heading {:05.1f}º {}'
+                                    .format(
+                                        bearingEstimate,
+                                        speedEstimate,
+                                        heading,
+                                        'GPS' if gpsDataUpdated else ''))
+                            else:
+                                print('Bearing -----º at {: 3.1f} m/s. Heading {:05.1f}º {}'
+                                    .format(
+                                        speedEstimate,
+                                        heading,
+                                        'GPS' if gpsDataUpdated else ''))
+                            gpsDataUpdated = False
 
                         # Length in km of 1° of latitude = always 111.32 km
                         # Length in km of 1° of longitude = 40075 km * cos( latitude ) / 360
@@ -201,8 +211,10 @@ def getReadLoop():
 
                         trackTrueRadians = ((450 - trackTrue) % 360) * degreesToRadians
                         displacementNorthM = displacementEastM = 0.0
-                        velocityNorthMs = speed * math.cos(trackTrueRadians)
-                        velocityEastMs = speed * math.sin(trackTrueRadians)
+                        velocityNorthMs = speed * math.cos(trackTrueRadians) + fakeAccelNorth
+                        velocityEastMs = speed * math.sin(trackTrueRadians) + fakeAccelEast
+                        
+                        gpsDataUpdated = True
                         
                     elif buff.startswith('$GPGGA,'):
                         parts = buff.decode('ascii').strip().split(',')
@@ -212,10 +224,10 @@ def getReadLoop():
                         continue
                 
                 headingCenterPixel = (forward - round(((heading % 360) / 360.0) * pixelCount)) % pixelCount
-                bearingCenterPixel = (forward - round((((bearingEstimate) % 360) / 360.0) * pixelCount)) % pixelCount if bearingEstimate is not None else None
+                bearingCenterPixel = (forward - round((((360 + heading - bearingEstimate) % 360) / 360.0) * pixelCount)) % pixelCount if bearingEstimate is not None else None
                 
                 speedEstimateKts = speedEstimate * 1.94384 # kts per m/s
-                speedNavWidth = 0 if speedEstimateKts == 0 else round(navLightWidth - (navLightWidth/(speedEstimateKts/6.0)))
+                speedNavWidth = 0 if speedEstimateKts == 0 else round(navLightWidth - (navLightWidth/(speedEstimateKts/6.0))) + 1
 
                 #print('{:03}º pixel # {}'.format(heading, headed))
                     
@@ -232,9 +244,9 @@ def getReadLoop():
 
                 for l in range(pixelCount):
                     np[l % pixelCount] = (
-                        (0,255,0) if bearingCenterPixel is not None and bearingCenterPixel in ((l + x) % pixelCount for x in range(0, -speedNavWidth, -1)) else
-                        (255,0,0) if bearingCenterPixel is not None and bearingCenterPixel in ((l + x) % pixelCount for x in range(1, 1 + speedNavWidth)) else
-                        (0,0,0) if 0 < speedNavWidth and headingCenterPixel in (((l - speedNavWidth) % pixelCount), ((l + 1 + speedNavWidth) % pixelCount)) else
+                        (0,255,0) if 0 < speedNavWidth and bearingCenterPixel in ((l + x) % pixelCount for x in range(0, -speedNavWidth, -1)) else
+                        (255,0,0) if 0 < speedNavWidth and bearingCenterPixel in ((l + x) % pixelCount for x in range(1, 1 + speedNavWidth)) else
+                        (0,0,0)   if 0 < speedNavWidth and bearingCenterPixel in (((l - speedNavWidth) % pixelCount), ((l + 1 + speedNavWidth) % pixelCount)) else
                         palette[
                             math.ceil(
                             ((perlin.getValue(
@@ -247,7 +259,7 @@ def getReadLoop():
             except OSError as e:
                 print(e)
 
-            await uasyncio.sleep_ms(0)
+            await uasyncio.sleep_ms(5)
 
     return readLoop
 
