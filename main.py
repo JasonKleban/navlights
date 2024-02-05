@@ -25,6 +25,9 @@ brightness = .05
 
 navLightWidth = 8
 
+degreesToRadians = math.pi / 180.0
+radiansToDegrees = 180.0 / math.pi
+
 def dull(r, g, b):
     return (int(brightness * r), int(brightness * g), int(brightness * b)) 
 
@@ -82,10 +85,13 @@ def getReadLoop():
         lastMS = utime.ticks_ms()
         time = status = lat = ns = lng = ew = None
         speed = trackTrue = date = mag = mew = None
+        displacementNorthM = displacementEastM = 0.0
+        velocityNorthMs = velocityEastMs = 0.0
         alt = au = None
         buff = None
         datetime = None
         headed = None
+        speedEstimate = bearingEstimate = 0.0
 
         while True:            
             try:                
@@ -102,7 +108,7 @@ def getReadLoop():
                     gravityVec = imu.gravity()
                     accelVec = imu.lin_acc()
                     compassVec = imu.mag()
-                    deltaMS = utime.ticks_diff(utime.ticks_ms(), lastMS); lastMS = utime.ticks_ms()
+                    deltaS = utime.ticks_diff(utime.ticks_ms(), lastMS) / 1000.0; lastMS = utime.ticks_ms()
                     buff = next(gpsModule)
                     
                     gravityMag = math.sqrt(gravityVec[0] * gravityVec[0] + gravityVec[1] * gravityVec[1] + gravityVec[2] * gravityVec[2]) or None
@@ -115,6 +121,9 @@ def getReadLoop():
                         gravityNormalized[2] * northNormalized[0] - gravityNormalized[0] * northNormalized[0], 
                         gravityNormalized[0] * northNormalized[1] - gravityNormalized[1] * northNormalized[0]) 
                         if gravityNormalized is not None and northNormalized is not None else None)
+                    
+                    heading = round(orientationVec[0])
+                    heading = 0 if heading == 360 else heading
 
                     # TODO
                     
@@ -128,12 +137,45 @@ def getReadLoop():
                     if accelUpMs2 is not None and accelNorthMs2 is not None and accelEastMs2 is not None:
                         #print('{:+0.1f}m/s² Up, {:+0.1f}m/s² North {:+0.1f}m/s² East'.format(
                         #   accelUpMs2, accelNorthMs2, accelEastMs2))
-                        print('{:+0.1f}m/s² Up'.format(accelUpMs2))
+                        #print('{:+0.1f}m/s² Up'.format(accelUpMs2))
+                        # directions = (accelUpMs2, accelNorthMs2, accelEastMs2)
+                        # pos = ("Up", "North", "East")
+                        # neg = ("Down", "South", "West")
+                        # largest_mag = max(directions, key=lambda x:abs(x))
+                        # if 4 < abs(largest_mag):
+                        #     whichAxis = directions.index(largest_mag)
+                        #     whichSign = pos if 0 <= directions[whichAxis] else neg
+                        #     print(whichSign[whichAxis])
+
+                        deltaS2 = deltaS * deltaS
+                        displacementNorthM += (velocityNorthMs * deltaS) + (0.5 * accelNorthMs2 * deltaS2)
+                        displacementEastM += (velocityEastMs * deltaS) + (0.5 * accelEastMs2 * deltaS2)
+                        velocityNorthMs += (accelNorthMs2 * deltaS)
+                        velocityEastMs += (accelEastMs2 * deltaS)
+
+                        angleRadians = math.atan2(velocityEastMs, velocityNorthMs)
+
+                        speedEstimate = math.sqrt(velocityEastMs * velocityEastMs + velocityNorthMs * velocityNorthMs)
+
+                        bearingEstimate = None if speedEstimate < 1.0 else (450.0 - (angleRadians * radiansToDegrees)) % 360
+
+                        # print('{:+0.1f}m North, {:+0.1f}m East'.format(displacementNorthM, displacementEastM))
                         
-                    
-                    # Length in km of 1° of latitude = always 111.32 km
-                    # Length in km of 1° of longitude = 40075 km * cos( latitude ) / 360
-                    
+                        if bearingEstimate is not None:
+                            print('Bearing {:05.1f}º at {: 3.1f} m/s. Heading {:05.1f}º'
+                                .format(
+                                    bearingEstimate,
+                                    speedEstimate,
+                                    heading));
+                        else:
+                            print('Bearing -----º at {: 3.1f} m/s. Heading {:05.1f}º'
+                                .format(
+                                    speedEstimate,
+                                    heading));
+
+                        # Length in km of 1° of latitude = always 111.32 km
+                        # Length in km of 1° of longitude = 40075 km * cos( latitude ) / 360
+
                     # Predict Kalman Filter
                     
                     # TODO
@@ -154,6 +196,13 @@ def getReadLoop():
                         trackTrue = 0.0 if trackTrue is not None and trackTrue.strip() == '' else float(trackTrue)
                         mag = 0.0 if mag is not None and mag.strip() == '' else float(mag)
                         speed = 0.0 if speed is not None and speed.strip() == '' else float(speed)
+
+                        # TODO before reset, calculate error for magnetic declination estimation
+
+                        trackTrueRadians = ((450 - trackTrue) % 360) * degreesToRadians
+                        displacementNorthM = displacementEastM = 0.0
+                        velocityNorthMs = speed * math.cos(trackTrueRadians)
+                        velocityEastMs = speed * math.sin(trackTrueRadians)
                         
                     elif buff.startswith('$GPGGA,'):
                         parts = buff.decode('ascii').strip().split(',')
@@ -161,12 +210,13 @@ def getReadLoop():
                         _, _, _, _, _, _, _, _, _, alt, au, *_ = parts
                     else:
                         continue
-                    
-                heading = round(orientationVec[0])
-                heading = 0 if heading == 360 else heading
                 
-                headed = (forward - round((heading / 360.0) * pixelCount)) % pixelCount
+                headingCenterPixel = (forward - round(((heading % 360) / 360.0) * pixelCount)) % pixelCount
+                bearingCenterPixel = (forward - round((((bearingEstimate) % 360) / 360.0) * pixelCount)) % pixelCount if bearingEstimate is not None else None
                 
+                speedEstimateKts = speedEstimate * 1.94384 # kts per m/s
+                speedNavWidth = 0 if speedEstimateKts == 0 else round(navLightWidth - (navLightWidth/(speedEstimateKts/6.0)))
+
                 #print('{:03}º pixel # {}'.format(heading, headed))
                     
 #                     print('{}: {}º{}{} {}º{}{} Tracking {:4.1f}º {} off {:05.1f}º at {:3.1f} kts, Heading {:03}º'
@@ -178,19 +228,19 @@ def getReadLoop():
 #                               speed,
 #                               heading))
 
-                f = (lastMS / 24) % frameCount
+                f = 12 # (lastMS / 24) % frameCount
 
                 for l in range(pixelCount):
                     np[l % pixelCount] = (
-                        (0,255,0) if headed in ((l + x) % pixelCount for x in range(0, -navLightWidth, -1)) else
-                        (255,0,0) if headed in ((l + x) % pixelCount for x in range(1, 1 + navLightWidth)) else
-                        (0,0,0) if headed in (((l - navLightWidth) % pixelCount), ((l + 1 + navLightWidth) % pixelCount)) else
-                            palette[
-                                math.ceil(
-                                ((perlin.getValue(
-                                    (f / frameCount) * cellsHigh,
-                                    (l / pixelCount) * cellsWide
-                                ) + 1) / 2) * len(palette)) ])
+                        (0,255,0) if bearingCenterPixel is not None and bearingCenterPixel in ((l + x) % pixelCount for x in range(0, -speedNavWidth, -1)) else
+                        (255,0,0) if bearingCenterPixel is not None and bearingCenterPixel in ((l + x) % pixelCount for x in range(1, 1 + speedNavWidth)) else
+                        (0,0,0) if 0 < speedNavWidth and headingCenterPixel in (((l - speedNavWidth) % pixelCount), ((l + 1 + speedNavWidth) % pixelCount)) else
+                        palette[
+                            math.ceil(
+                            ((perlin.getValue(
+                                (f / frameCount) * cellsHigh,
+                                ((l - headingCenterPixel) / pixelCount) * cellsWide
+                            ) + 1) / 2) * len(palette)) ])
                 
                 np.write()
 
