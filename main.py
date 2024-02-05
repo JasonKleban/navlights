@@ -27,6 +27,7 @@ navLightWidth = 8
 
 degreesToRadians = math.pi / 180.0
 radiansToDegrees = 180.0 / math.pi
+ktsPerMs = 1.94384
 
 fakeAccelEast = 0.0
 fakeAccelNorth = 0.0
@@ -76,7 +77,7 @@ def getReadLoop():
     
     calibrated = False
     imu = BNO055(i2c)
-    imu.set_offsets(bytearray(ubinascii.unhexlify('f3ff1a00deffc3ff9dfde3fd03000100ffffe8031e04')))
+    imu.set_offsets(bytearray(ubinascii.unhexlify('f3ff1a00deffc3ff9dfde3fdfffffeffffffe8033203')))
     
     gpsModule = lineReader(machine.UART(1, baudrate=9600, timeout=0, tx=21, rx=20))
 
@@ -89,7 +90,7 @@ def getReadLoop():
         time = status = lat = ns = lng = ew = None
         speed = trackTrue = date = mag = mew = None
         displacementNorthM = displacementEastM = 0.0
-        velocityNorthMs = velocityEastMs = 0.0
+        velocityUpMs = velocityNorthMs = velocityEastMs = 0.0
         alt = au = None
         buff = None
         datetime = None
@@ -115,15 +116,19 @@ def getReadLoop():
                     deltaS = utime.ticks_diff(utime.ticks_ms(), lastMS) / 1000.0; lastMS = utime.ticks_ms()
                     buff = next(gpsModule)
                     
-                    gravityMag = math.sqrt(gravityVec[0] * gravityVec[0] + gravityVec[1] * gravityVec[1] + gravityVec[2] * gravityVec[2]) or None
-                    gravityNormalized = (gravityVec[0] / gravityMag, gravityVec[1] / gravityMag, gravityVec[2] / gravityMag) if gravityMag is not None else None
+                    gravityMag = 0 - math.sqrt(gravityVec[0] * gravityVec[0] + gravityVec[1] * gravityVec[1] + gravityVec[2] * gravityVec[2])
+                    gravityNormalized = (gravityVec[0] / gravityMag, gravityVec[1] / gravityMag, gravityVec[2] / gravityMag) if gravityMag != 0 else None
                                         
-                    compassMag = math.sqrt(compassVec[0] * compassVec[0] + compassVec[1] * compassVec[1] + compassVec[2] * compassVec[2]) or None
-                    northNormalized = (compassVec[0] / compassMag, compassVec[1] / compassMag, compassVec[2] / compassMag) if compassMag is not None else None
+                    compassMag = math.sqrt(compassVec[0] * compassVec[0] + compassVec[1] * compassVec[1] + compassVec[2] * compassVec[2])
+                    northNormalized = (compassVec[0] / compassMag, compassVec[1] / compassMag, compassVec[2] / compassMag) if compassMag != 0 else None
                     
-                    eastNormalized = ((gravityNormalized[1] * northNormalized[2] - gravityNormalized[2] * northNormalized[1], 
-                        gravityNormalized[2] * northNormalized[0] - gravityNormalized[0] * northNormalized[0], 
-                        gravityNormalized[0] * northNormalized[1] - gravityNormalized[1] * northNormalized[0]) 
+                    # Right-hand rule cross product a x b
+                    # northNormalized => a
+                    # gravityNormalized => b
+                    
+                    eastNormalized = ((northNormalized[1] * gravityNormalized[2] - northNormalized[2] * gravityNormalized[1], 
+                        northNormalized[2] * gravityNormalized[0] - northNormalized[0] * gravityNormalized[2], 
+                        northNormalized[0] * gravityNormalized[1] - northNormalized[1] * gravityNormalized[0]) 
                         if gravityNormalized is not None and northNormalized is not None else None)
                     
                     heading = round(orientationVec[0])
@@ -131,7 +136,7 @@ def getReadLoop():
 
                     # TODO
                     
-                    accelUpMs2 = (-(gravityNormalized[0] * accelVec[0] + gravityNormalized[1] * accelVec[1] + gravityNormalized[2] * accelVec[2])
+                    accelUpMs2 = ((gravityNormalized[0] * accelVec[0] + gravityNormalized[1] * accelVec[1] + gravityNormalized[2] * accelVec[2])
                         if gravityNormalized is not None else None)
                     accelNorthMs2 = ((northNormalized[0] * accelVec[0] + northNormalized[1] * accelVec[1] + northNormalized[2] * accelVec[2])
                         if northNormalized is not None else None)
@@ -139,8 +144,6 @@ def getReadLoop():
                         if eastNormalized is not None else None)
 
                     if accelUpMs2 is not None and accelNorthMs2 is not None and accelEastMs2 is not None:
-                        #print('{:+0.1f}m/s² Up, {:+0.1f}m/s² North {:+0.1f}m/s² East'.format(
-                        #   accelUpMs2, accelNorthMs2, accelEastMs2))
                         #print('{:+0.1f}m/s² Up'.format(accelUpMs2))
                         # directions = (accelUpMs2, accelNorthMs2, accelEastMs2)
                         # pos = ("Up", "North", "East")
@@ -151,9 +154,10 @@ def getReadLoop():
                         #     whichSign = pos if 0 <= directions[whichAxis] else neg
                         #     print(whichSign[whichAxis])
 
-                        deltaS2 = deltaS * deltaS
-                        displacementNorthM += (velocityNorthMs * deltaS) + (0.5 * accelNorthMs2 * deltaS2)
-                        displacementEastM += (velocityEastMs * deltaS) + (0.5 * accelEastMs2 * deltaS2)
+                        #deltaS2 = deltaS * deltaS
+                        #displacementNorthM += (velocityNorthMs * deltaS) + (0.5 * accelNorthMs2 * deltaS2)
+                        #displacementEastM += (velocityEastMs * deltaS) + (0.5 * accelEastMs2 * deltaS2)
+                        #velocityUpMs += (accelUpMs2 * deltaS)
                         velocityNorthMs += (accelNorthMs2 * deltaS)
                         velocityEastMs += (accelEastMs2 * deltaS)
 
@@ -161,26 +165,37 @@ def getReadLoop():
 
                         speedEstimate = math.sqrt((velocityEastMs + fakeAccelEast) * (velocityEastMs + fakeAccelEast) + (velocityNorthMs + fakeAccelNorth) * (velocityNorthMs + fakeAccelNorth))
 
-                        bearingEstimate = None if abs(speedEstimate) < 0.5 else (450.0 + (angleRadians * radiansToDegrees)) % 360
+                        #bearingEstimate = None if speedEstimate < 0.5 else (450.0 + (angleRadians * radiansToDegrees)) % 360
+                        bearingEstimate = (450.0 - (angleRadians * radiansToDegrees)) % 360
 
                         # print('{:+0.1f}m North, {:+0.1f}m East'.format(displacementNorthM, displacementEastM))
                         
                         # print('{: 3.1f} m/s'.format(speedEstimate))
 
-                        if utime.ticks_ms() % 5 == 0:
-                            if bearingEstimate is not None:
-                                print('Bearing {:05.1f}º at {: 3.1f} m/s. Heading {:05.1f}º {}'
-                                    .format(
-                                        bearingEstimate,
-                                        speedEstimate,
-                                        heading,
-                                        'GPS' if gpsDataUpdated else ''))
-                            else:
-                                print('Bearing -----º at {: 3.1f} m/s. Heading {:05.1f}º {}'
-                                    .format(
-                                        speedEstimate,
-                                        heading,
-                                        'GPS' if gpsDataUpdated else ''))
+                        if utime.ticks_ms() % 30 == 0:
+                            # print('{:+3.1f} m/s² Up, {:+3.1f} m/s² North {:+3.1f} m/s² East'.format(
+                            #    accelUpMs2, accelNorthMs2, accelEastMs2))
+                            # print('{:+3.1f} m/s Up {:+3.1f} m/s North {:+3.1f} m/s East {}'.format(
+                            #     velocityUpMs,
+                            #     velocityNorthMs,
+                            #     velocityEastMs,
+                            #     'GPS' if gpsDataUpdated else ''))
+                            # print('{:+3.1f} m/s Up {:+3.1f} m/s North'.format(
+                            #     velocityUpMs,
+                            #     velocityNorthMs))
+                            # if bearingEstimate is not None:
+                            #     print('Bearing {:05.1f}º at {: 3.1f}kt. Heading {:05.1f}º {}'
+                            #         .format(
+                            #             bearingEstimate,
+                            #             speedEstimate * ktsPerMs,
+                            #             heading,
+                            #             'GPS' if gpsDataUpdated else ''))
+                            # else:
+                            #     print('Bearing -----º at {: 3.1f}kt. Heading {:05.1f}º {}'
+                            #         .format(
+                            #             speedEstimate * ktsPerMs,
+                            #             heading,
+                            #             'GPS' if gpsDataUpdated else ''))
                             gpsDataUpdated = False
 
                         # Length in km of 1° of latitude = always 111.32 km
@@ -205,14 +220,24 @@ def getReadLoop():
                         datetime = '20{}-{}-{} {}:{}:{} UTC'.format(date[4:], date[2:4], date[:2], time[:2], time[2:4], time[4:6])
                         trackTrue = 0.0 if trackTrue is not None and trackTrue.strip() == '' else float(trackTrue)
                         mag = 0.0 if mag is not None and mag.strip() == '' else float(mag)
-                        speed = 0.0 if speed is not None and speed.strip() == '' else float(speed)
+                        speed = 0.0 if speed is not None and speed.strip() == '' else float(speed) / ktsPerMs
 
                         # TODO before reset, calculate error for magnetic declination estimation
 
                         trackTrueRadians = ((450 - trackTrue) % 360) * degreesToRadians
-                        displacementNorthM = displacementEastM = 0.0
-                        velocityNorthMs = speed * math.cos(trackTrueRadians) + fakeAccelNorth
-                        velocityEastMs = speed * math.sin(trackTrueRadians) + fakeAccelEast
+                        # displacementNorthM = displacementEastM = 0.0
+                        # velocityUpMs = 0
+                        velocityNorthMs = speed * math.sin(trackTrueRadians) + fakeAccelNorth
+                        velocityEastMs = speed * math.cos(trackTrueRadians) + fakeAccelEast
+
+                        # print('{:+3.1f} m/s North {:+3.1f} m/s East'.format(
+                        #     velocityNorthMs,
+                        #     velocityEastMs))
+
+                        # print('θ = {:05.1f} at {:3.1f} m/s'
+                        #     .format(
+                        #         ((450 - trackTrue) % 360),
+                        #         speed))
                         
                         gpsDataUpdated = True
                         
@@ -223,12 +248,13 @@ def getReadLoop():
                     else:
                         continue
                 
-                headingCenterPixel = (forward - round(((heading % 360) / 360.0) * pixelCount)) % pixelCount
-                bearingCenterPixel = (forward - round((((360 + heading - bearingEstimate) % 360) / 360.0) * pixelCount)) % pixelCount if bearingEstimate is not None else None
+                headingCenterPixel = (pixelCount + forward - round(((heading % 360) / 360.0) * pixelCount)) % pixelCount
+                bearingCenterPixel = (pixelCount + forward - round((((360 + heading - bearingEstimate) % 360) / 360.0) * pixelCount)) % pixelCount if bearingEstimate is not None else None
                 
-                speedEstimateKts = speedEstimate * 1.94384 # kts per m/s
-                speedNavWidth = 0 if speedEstimateKts == 0 else round(navLightWidth - (navLightWidth/(speedEstimateKts/6.0))) + 1
+                speedEstimateKts = speedEstimate * ktsPerMs
+                speedNavWidth = 0 if speedEstimateKts == 0 else max(0, math.floor(navLightWidth - (navLightWidth/(speedEstimateKts + .3))))
 
+                #print(speedNavWidth)
                 #print('{:03}º pixel # {}'.format(heading, headed))
                     
 #                     print('{}: {}º{}{} {}º{}{} Tracking {:4.1f}º {} off {:05.1f}º at {:3.1f} kts, Heading {:03}º'
@@ -240,7 +266,7 @@ def getReadLoop():
 #                               speed,
 #                               heading))
 
-                f = 12 # (lastMS / 24) % frameCount
+                f = (lastMS / 24) % frameCount
 
                 for l in range(pixelCount):
                     np[l % pixelCount] = (
