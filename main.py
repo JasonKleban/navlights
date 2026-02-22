@@ -13,7 +13,7 @@ from perlin import Perlin2D
 boottime = utime.time()
 print("HELLO")
 
-pixelCount = 64 + 11
+pixelCount = 64 + 11 # 64 actually present, 11 phantom pixel placeholders not physically present
 frameCount = 512
 forward = 32
 
