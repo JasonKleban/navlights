@@ -1,0 +1,8 @@
+MEMORY
+{
+  FLASH (rx)  : ORIGIN = 0x10000, LENGTH = 0x3EF000
+  CONFIG (r)  : ORIGIN = 0x3FF000, LENGTH = 0x1000
+  RAM   (rw)  : ORIGIN = 0x3FFB0000, LENGTH = 0x50000
+}
+
+_config_start = ORIGIN(CONFIG);

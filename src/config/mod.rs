@@ -1,19 +1,24 @@
-pub mod flash_format;
+mod codec;
 mod storage;
 
-use storage::{ FlashStorage };
-use flash_format::{serialize, validate};
+pub use storage::FlashStorage;
 
+use musli::{Encode, Decode};
+use bno055::BNO055Calibration;
+
+#[derive(Default, Debug, PartialEq, Encode, Decode)]
 pub struct Config {
-    pub true_offset_deg: f32,
+    #[musli(with = codec::calibration_option_adapter)]
+    pub bno_calibration_profile: Option<BNO055Calibration>,
+    pub true_offset_deg: Option<f32>,
 }
 
-pub fn load() -> Option<Config> {
-    let bytes = FlashStorage::load().expect("Unable to read from flash storage");
+impl Config {
+    pub fn load() -> Option<Self> {
+        FlashStorage::load()
+    }
 
-    validate(&bytes)
-}
-
-pub fn store(config : &Config) -> () {
-    FlashStorage::store(serialize(&config)).expect("Flash storage should have been successful")
+    pub fn store(&self) -> Result<(), storage::FlashError> {
+        FlashStorage::store(self)
+    }
 }
