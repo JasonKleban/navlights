@@ -7,7 +7,9 @@ mod nmea_line_reader;
 
 use esp_println::{print, println};
 use esp_hal::time::Instant;
+use core::str::FromStr;
 
+use crate::math::KTS_PER_METER_SECOND;
 use crate::peripherals::orientation::{ OSensorStatus, CALIBRATION_STATUS_ZERO };
 
 use crate::nav_hat_board::NavHatBoard;
@@ -101,7 +103,7 @@ pub fn program () -> ! {
 
             // Positive values indicate right wing down (roll), nose up (pitch), and nose right (yaw).
             
-            println!("BNO055 readings:");
+            //println!("BNO055 readings:");
             println!("  orientation: {:>+06.1}° roll, {:>+06.1}° pitch, {:>+06.1}° yaw", orientation.roll, orientation.pitch, orientation.yaw);
             println!("  gravity: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>", gravity.x, gravity.y, gravity.z);
             println!("  linear_acceleration: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>", linear_acceleration.x, linear_acceleration.y, linear_acceleration.z);
@@ -112,7 +114,62 @@ pub fn program () -> ! {
 
         while let Ok(Some(byte)) = nav_hat_board.read_uart_byte() {
             if let Some(sentence) = nlr.push_byte(byte) {
-                println!(" 🌎 {}", sentence.trim_ascii_end());
+                match sentence {
+                    s if s.starts_with("$GPRMC,") => {
+                        let mut spliterator = sentence.trim_ascii_end().split(",").skip(1);
+
+                        if let (Some(time), Some(_), Some(lat), Some(north_south), Some(lng), Some(east_west), 
+                            Some(speed_kts), track_true_degrees, Some(date), mag_offset_degrees, mag_offset_east_west) = (
+                            spliterator.next(),
+                            spliterator.next(),
+                            spliterator.next().and_then(|lat| f32::from_str(lat).ok()),
+                            spliterator.next(),
+                            spliterator.next().and_then(|lng| f32::from_str(lng).ok()),
+                            spliterator.next(),
+                            spliterator.next().and_then(|speed_kts| f32::from_str(speed_kts).ok()),
+                            spliterator.next().and_then(|track_true_degrees| f32::from_str(track_true_degrees).ok()),
+                            spliterator.next(),
+                            spliterator.next().and_then(|mag_offset_degrees| f32::from_str(mag_offset_degrees).ok()),
+                            spliterator.next()
+                        ) {
+                            print!(" 🌎 20{}-{}-{} {}:{}:{} UTC: {:>8.4}° {}, {:>8.4}° {}", 
+                                &date[4..], &date[2..4], &date[..2], &time[..2], &time[2..4], &time[4..6],
+                                lat / 100.0, north_south,
+                                lng / 100.0, east_west
+                            );
+
+                            if let Some(degrees) = track_true_degrees {
+                                print!(" tracking {:>+06.1}° at {:>8.4}kts ({:>8.4} m/s)", 
+                                degrees, 
+                                speed_kts, 
+                                speed_kts * KTS_PER_METER_SECOND);
+
+                                if let (Some(degrees), Some(east_west)) = (mag_offset_degrees, mag_offset_east_west) {
+                                    println!(" (off {:>+06.1}° {})", 
+                                        degrees,
+                                        east_west);
+                                }
+                            } else {
+                                println!();
+                            }
+                        } else {
+                            println!(" 🛰 : {}", sentence.trim_ascii_end());
+                        }
+                    },
+                    s if s.starts_with("$GPGGA,") => {
+                        let mut spliterator = sentence.trim_ascii_end().split(",").skip(9);
+
+                        if let (Some(alt), Some(au)) = (
+                            spliterator.next().and_then(|alt| f32::from_str(alt).ok()),
+                            spliterator.next()
+                        ) {
+                            println!(" 🌎         {:>8.4} {}", alt, au);
+                        } else {
+                            println!(" 🛰 : {}", sentence.trim_ascii_end());
+                        }
+                    },
+                    _ => ()
+                }
             }
         }
 

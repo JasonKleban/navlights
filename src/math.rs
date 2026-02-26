@@ -1,9 +1,9 @@
 use bno055::mint;
 use num_traits::float::Float;
 
-const KTS_PER_METER_SECOND : f32  = 1.94384;
-const DEGREES_TO_RADIANS : f32  = core::f32::consts::PI / 180.0;
-const RADIANS_TO_DEGREES : f32  = 180.0 / core::f32::consts::PI;
+pub const KTS_PER_METER_SECOND : f32  = 1.94384;
+pub const DEGREES_TO_RADIANS : f32  = core::f32::consts::PI / 180.0;
+pub const RADIANS_TO_DEGREES : f32  = 180.0 / core::f32::consts::PI;
 
 pub struct Orientation {
     pub roll: f32,

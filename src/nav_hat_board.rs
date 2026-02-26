@@ -57,9 +57,12 @@ impl<'d> NavHatBoard<'d> {
     pub fn read_uart_byte(&mut self) -> Result<Option<u8>, BoardError> {
         let mut byte = [0u8; 1];
         
-        match (self.uart_rx.read_ready(), self.uart_rx.read(&mut byte).map_err(BoardError::UartRx)?) {
-            (true, 1) => Ok(Some(byte[0])),
-            _ => Ok(None)
+        if self.uart_rx.read_ready() && 
+            1 == self.uart_rx.read(&mut byte)
+                .map_err(BoardError::UartRx)? {
+            Ok(Some(byte[0]))
+        } else { 
+            Ok(None)
         }
     }
 }

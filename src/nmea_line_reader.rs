@@ -1,6 +1,6 @@
 use core::str;
 
-const LINE_CAP: usize = 96;
+const LINE_CAP: usize = 120;
 
 pub struct NmeaLineReader {
     line: [u8; LINE_CAP],
