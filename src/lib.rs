@@ -5,8 +5,10 @@ use esp_hal::time::{Rate};
 use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::time::Instant;
 use bno055::{Bno055, mint};
+use bno055::{AxisRemap, BNO055AxisConfig, BNO055AxisSign};
 
 mod config;
+mod math;
 
 static CALIBRATION_STATUS_ZERO : bno055::BNO055CalibrationStatus = bno055::BNO055CalibrationStatus{ sys: 0, gyr: 0, acc: 0, mag: 0 };
 
@@ -14,10 +16,9 @@ enum OSensorStatus {
     Uncalibrated(bno055::BNO055CalibrationStatus),
     Ready,
     Readings {
-        euler_angles: mint::EulerAngles<f32, ()>,
         gravity: mint::Vector3<f32>,
-        accel_data: mint::Vector3<f32>,
-        mag_data: mint::Vector3<f32>,
+        linear_acceleration: mint::Vector3<f32>,
+        //mag_data: mint::Vector3<f32>,
         quaternion: mint::Quaternion<f32>,
         temperature: i8,
     }
@@ -36,7 +37,8 @@ impl NavHatBoard<'_> {
             Config::default().with_frequency(Rate::from_khz(400))).unwrap()
                 .with_sda(peripherals.GPIO6)
                 .with_scl(peripherals.GPIO7);
-        let bno055 = Bno055::new(i2c0);
+        let bno055 = Bno055::new(i2c0)
+            .with_alternative_address();
 
         return Self {
             bno055
@@ -51,8 +53,19 @@ pub fn program () -> ! {
 
     println!("Initializing BNO055 ...");
     nav_hat_board.bno055.init(&mut delay).unwrap();
-    nav_hat_board.bno055.set_mode(bno055::BNO055OperationMode::NDOF, &mut delay).unwrap();
     println!("BNO055 initialized.");
+
+    let remap = AxisRemap::builder()
+        .swap_x_with(BNO055AxisConfig::AXIS_AS_Y)
+        .build()
+        .expect("Should have been able to build axis remap config");
+    nav_hat_board.bno055.set_axis_remap(remap).unwrap();
+    nav_hat_board.bno055.set_axis_sign(BNO055AxisSign::X_NEGATIVE | BNO055AxisSign::Y_NEGATIVE)
+        .expect("Unable to communicate");
+    println!("BNO055 axes remapped.");
+
+    nav_hat_board.bno055.set_mode(bno055::BNO055OperationMode::NDOF, &mut delay).unwrap();
+    println!("BNO055 NDOF mode set.");
 
     println!("Checking for stored configuration ...");
     let mut app_config = config::Config::load();
@@ -125,26 +138,28 @@ pub fn program () -> ! {
             }
         } else {
             osensor_status = OSensorStatus::Readings {
-                euler_angles: nav_hat_board.bno055.euler_angles().unwrap(),
                 gravity: nav_hat_board.bno055.gravity().unwrap(),
-                accel_data: nav_hat_board.bno055.accel_data().unwrap(),
-                mag_data: nav_hat_board.bno055.mag_data().unwrap(),
+                linear_acceleration: nav_hat_board.bno055.linear_acceleration().unwrap(),
+                //mag_data: nav_hat_board.bno055.mag_data().unwrap(),
                 quaternion: nav_hat_board.bno055.quaternion().unwrap(),
                 temperature: nav_hat_board.bno055.temperature().unwrap()
             };
 
-            if let OSensorStatus::Readings { euler_angles, gravity, accel_data, mag_data, quaternion, temperature } = osensor_status {
-                println!("BNO055 readings: \n\teuler_angles: <{:.2}, {:.2}, {:.2}>, \n\tgravity: <{:.2}, {:.2}, {:.2}>, \n\taccel_data: <{:.2}, {:.2}, {:.2}>, \n\tmag_data: <{:.2}, {:.2}, {:.2}>, \n\tquaternion: <{:.2}, {:.2}, {:.2}, {:.2}>, \n\ttemperature: {}°C", 
-                    euler_angles.a, euler_angles.b, euler_angles.c, 
-                    gravity.x, gravity.y, gravity.z, 
-                    accel_data.x, accel_data.y, accel_data.z,
-                    mag_data.x, mag_data.y, mag_data.z,
-                    quaternion.v.x, quaternion.v.y, quaternion.v.z, quaternion.s,
-                    temperature
-                );
+            if let OSensorStatus::Readings { gravity, linear_acceleration, quaternion, temperature, .. } = &osensor_status {
+
+                // Positive values indicate right wing down (roll), nose up (pitch), and nose right (yaw).
+                let orientation = math::quaternion_to_euler(quaternion);
+
+                println!("BNO055 readings:");
+                println!("  orientation: {:>+06.1}° roll, {:>+06.1}° pitch, {:>+06.1}° yaw", orientation.roll, orientation.pitch, orientation.yaw);
+                println!("  gravity: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>", gravity.x, gravity.y, gravity.z);
+                println!("  linear_acceleration: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>", linear_acceleration.x, linear_acceleration.y, linear_acceleration.z);
+                //println!("  mag_data: <{:>+6.2}, {:>+6.2}, {:>+6.2}>", mag_data.x, mag_data.y, mag_data.z);
+                //println!("  quaternion: <{:>+6.2}, {:>+6.2}, {:>+6.2}, {:>+6.2}>", quaternion.v.x, quaternion.v.y, quaternion.v.z, quaternion.s);
+                println!("  temperature: {:.1}°C", temperature);
             }
         }
 
-        delay.delay_millis(500);
+        delay.delay_millis(100);
     }
 }
