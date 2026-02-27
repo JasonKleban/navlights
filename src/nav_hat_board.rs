@@ -3,25 +3,29 @@ use esp_hal::clock::CpuClock;
 use esp_hal::time::{Rate};
 use esp_hal::i2c::master as i2c;
 use esp_hal::uart;
+use esp_hal::rmt;
 use bno055::{Bno055, AxisRemap, BNO055AxisConfig, BNO055AxisSign};
+use crate::ws2812_rmt;
 
 #[derive(Debug)]
 pub enum BoardError {
     I2cConfig(i2c::ConfigError),
-    //I2c(i2c::Error),
     UartConfig(uart::ConfigError),
     UartRx(uart::RxError),
-    Bno055(bno055::Error<i2c::Error>)
+    Bno055(bno055::Error<i2c::Error>),
+    RMT(esp_hal::rmt::Error)
 }
 
 pub struct NavHatBoard<'d> {
     pub bno055: Bno055<i2c::I2c<'d, esp_hal::Blocking>>,
-    uart_rx: uart::UartRx<'d, esp_hal::Blocking>
+    uart_rx: uart::UartRx<'d, esp_hal::Blocking>,
+    pub neopixels: ws2812_rmt::Ws2812<'d, esp_hal::rmt::Tx>
 }
 
 impl<'d> NavHatBoard<'d> {
     pub fn new() -> Result<Self, BoardError> {
         let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+
         let peripherals = esp_hal::init(config);
         let i2c0: i2c::I2c<'_, esp_hal::Blocking> = i2c::I2c::new(
             peripherals.I2C0, 
@@ -36,10 +40,20 @@ impl<'d> NavHatBoard<'d> {
             .with_tx(peripherals.GPIO21)
             .with_rx(peripherals.GPIO20)
             .split();
+        let mut rmt = rmt::Rmt::new(peripherals.RMT, 80.MHz())?;
+        let channel = rmt.channel0;
+
+        let neopixels = ws2812_rmt::Ws2812::new(
+            &mut rmt, 
+            rmt.channel0,
+            peripherals.GPIO3,
+            &peripherals.clocks
+        ).unwrap();
 
         return Ok(Self {
             bno055,
-            uart_rx
+            uart_rx,
+            neopixels
         });
     }
 
