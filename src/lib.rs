@@ -168,31 +168,33 @@ pub fn program () -> ! {
                 yaw * RADIANS_TO_DEGREES + 180.0
             );
 
-            //let mut theta = rel_dir;
+            let mut theta = rel_dir;
 
             // Clamp to arc
-            // if theta < ARC_START { theta = ARC_START; }
-            // if theta > ARC_END { theta = ARC_END; }
+            if theta < ARC_START { theta = ARC_START; }
+            if theta > ARC_END { theta = ARC_END; }
 
-            // let normalized = (theta - ARC_START) / ARC_SPAN;
+            let normalized = (theta - ARC_START) / ARC_SPAN;
 
-            // let pixel = (normalized * (PIXELS as f32 - 1.0)) as usize;
+            let pixel = (normalized * (PIXELS as f32 - 1.0)) as usize;
 
-            // if true {
-            //     data[pixel] = [ 0u8, 50u8, 0u8 ];
+            if true {
+                data[pixel] = [ 0u8, 50u8, 0u8 ];
 
-            //     for i in 0..64 {
-            //         let dist = (i as i32 - pixel as i32).abs();
-            //         if dist < 4 {
-            //             let intensity = 50 / (dist as u8 + 1);
-            //             data[i] = [ 0u8, intensity, 0u8 ];
-            //         }
-            //     }
-            // }
-
-            for i in 0..64 {
-                data[i] = [ 0u8, 150u8, 0u8 ];
+                for i in 0..64 {
+                    let dist = (i as i32 - pixel as i32).abs();
+                    if dist < 4 {
+                        let intensity = 50 / (dist as u8 + 1);
+                        data[i] = [ 0u8, intensity, 0u8 ];
+                    } else {
+                        data[i] = [ 0u8, 0u8, 0u8 ];
+                    }
+                }
             }
+
+            // for i in 0..64 {
+            //     data[i] = [ 0u8, 150u8, 0u8 ];
+            // }
 
             nav_hat_board.neopixels.write(&data);
         }
