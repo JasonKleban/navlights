@@ -1,5 +1,9 @@
 use esp_hal::{
-    Blocking, gpio::{Level, OutputPin}, peripherals::RMT, rmt::{self, Channel, PulseCode, Tx, TxChannelConfig, TxChannelCreator}, time::Rate
+    Blocking, 
+    gpio::{Level, OutputPin}, 
+    peripherals::RMT, 
+    rmt::{self, Channel, PulseCode, Tx, TxChannelConfig, TxChannelCreator}, 
+    time::Rate
 };
 
 pub struct Ws2812<'d> {
@@ -35,9 +39,9 @@ impl<'d> Ws2812<'d> {
                     let is_one = (byte >> bit) & 1 != 0;
 
                     symbols[idx] = if is_one {
-                        ws2812_one()
+                        PulseCode::new(Level::High, 64, Level::Low, 36)
                     } else {
-                        ws2812_zero()
+                        PulseCode::new(Level::High, 32, Level::Low, 68)
                     };
 
                     idx += 1;
@@ -54,12 +58,4 @@ impl<'d> Ws2812<'d> {
         let tx = channel.transmit(&symbols[..=idx]).unwrap();
         self.channel = Some(tx.wait().unwrap());
     }
-}
-
-fn ws2812_zero() -> PulseCode {
-    PulseCode::new(Level::High, 32, Level::Low, 68)
-}
-
-fn ws2812_one() -> PulseCode {
-    PulseCode::new(Level::High, 64, Level::Low, 36)
 }
