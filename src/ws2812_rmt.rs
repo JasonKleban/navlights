@@ -1,107 +1,83 @@
 use esp_hal::{
-    gpio::OutputPin,
-    rmt::{
-        Rmt,
-        TxChannel,
-        TxChannelConfig,
-        Pulse,
-        Channel,
-    },
-    clock::Clocks,
+    Blocking, gpio::{Level, OutputPin}, peripherals::RMT, rmt::{self, Channel, PulseCode, Tx, TxChannelConfig, TxChannelCreator}, time::Rate
 };
 
-/// WS2812 timing constants in nanoseconds
-const T0H_NS: u32 = 400;
-const T0L_NS: u32 = 850;
-const T1H_NS: u32 = 800;
-const T1L_NS: u32 = 450;
-const RESET_NS: u32 = 50_000; // 50 µs reset latch
-
-/// Convert nanoseconds to RMT ticks
-fn ns_to_ticks(ns: u32, rmt_clock_hz: u32) -> u16 {
-    ((ns as u64 * rmt_clock_hz as u64) / 1_000_000_000u64) as u16
+pub struct Ws2812<'d> {
+    channel: Option<Channel<'d, Blocking, Tx>>,
 }
 
-pub struct Ws2812<'a, C: Channel> {
-    channel: TxChannel<'a, C>,
-    ticks_per_ns: u32,
-}
-
-impl<'a, C: Channel> Ws2812<'a, C> {
+impl<'d> Ws2812<'d> {
     pub fn new(
-        rmt: &mut Rmt,
-        channel: C,
-        pin: impl OutputPin,
-        clocks: &Clocks,
+        rmt_peripheral: RMT<'d>,
+        pin: impl OutputPin + 'd,
     ) -> Self {
-        // 80 MHz default APB on ESP32-C3
-        let rmt_clock_hz = clocks.apb_clock.to_Hz();
+        let rmt = rmt::Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
 
-        let tx = rmt
-            .channel(channel)
-            .configure(
-                pin,
-                TxChannelConfig::default(),
-            )
-            .unwrap();
+        // Configure channel 0 for TX
+        let tx_config = TxChannelConfig::default();
 
-        Self {
-            channel: tx,
-            ticks_per_ns: rmt_clock_hz,
-        }
+        let channel = Some(rmt.channel0.configure_tx(pin, tx_config).unwrap());
+
+        Self { channel }
     }
 
-    /// Write RGB pixels (GRB order required by WS2812)
     pub fn write(&mut self, pixels: &[[u8; 3]]) {
-        // Each pixel = 24 bits = 24 RMT symbols
-        // Add one reset pulse at end
-        const MAX_PIXELS: usize = 64; // adjust for your strip
-        const SYMBOLS_PER_PIXEL: usize = 24;
-        const TOTAL_SYMBOLS: usize =
-            MAX_PIXELS * SYMBOLS_PER_PIXEL + 1;
+        for pixel in pixels {
+            self.write_one(pixel);
+        }
 
-        let mut symbols: [Pulse; TOTAL_SYMBOLS] =
-            [Pulse::new(false, 0, false, 0); TOTAL_SYMBOLS];
+        self.reset();
+    }
+
+    fn write_one(&mut self, pixel: &[u8; 3]) {
+        // 24 symbols per LED
+        let mut symbols: [PulseCode; 25] =
+            [PulseCode::default(); 25];
 
         let mut idx = 0;
 
-        let t0h = ns_to_ticks(T0H_NS, self.ticks_per_ns);
-        let t0l = ns_to_ticks(T0L_NS, self.ticks_per_ns);
-        let t1h = ns_to_ticks(T1H_NS, self.ticks_per_ns);
-        let t1l = ns_to_ticks(T1L_NS, self.ticks_per_ns);
+        // WS2812 expects GRB
+        let bytes = [pixel[1], pixel[0], pixel[2]];
 
-        for pixel in pixels {
-            // WS2812 expects GRB
-            let bytes = [pixel[1], pixel[0], pixel[2]];
+        for byte in bytes {
+            for bit in (0..8).rev() {
+                let is_one = (byte >> bit) & 1 != 0;
 
-            for byte in bytes {
-                for bit in (0..8).rev() {
-                    let is_one = (byte & (1 << bit)) != 0;
+                symbols[idx] = if is_one {
+                    ws2812_one()
+                } else {
+                    ws2812_zero()
+                };
 
-                    symbols[idx] = if is_one {
-                        Pulse::new(true, t1h, false, t1l)
-                    } else {
-                        Pulse::new(true, t0h, false, t0l)
-                    };
-
-                    idx += 1;
-                }
+                idx += 1;
             }
         }
 
-        // Reset pulse (low for 50µs)
-        let reset_ticks =
-            ns_to_ticks(RESET_NS, self.ticks_per_ns);
+        symbols[24] = PulseCode::end_marker();
 
-        symbols[idx] =
-            Pulse::new(false, reset_ticks, false, 0);
+        let channel = self.channel.take().unwrap();
 
-        idx += 1;
+        let tx = channel.transmit(&symbols).unwrap();
 
-        self.channel
-            .transmit(&symbols[..idx])
-            .unwrap();
-
-        while self.channel.is_transmitting() {}
+        self.channel = Some(tx.wait().unwrap());
     }
+
+    fn reset(&mut self) {
+        // >50µs low
+        let reset = [ PulseCode::new(Level::Low, 4000, Level::Low, 0) ];
+
+        let channel = self.channel.take().unwrap();
+
+        let tx = channel.transmit(&reset).unwrap();
+
+        self.channel = Some(tx.wait().unwrap());
+    }
+}
+
+fn ws2812_zero() -> PulseCode {
+    PulseCode::new(Level::High, 32, Level::Low, 68)
+}
+
+fn ws2812_one() -> PulseCode {
+    PulseCode::new(Level::High, 64, Level::Low, 36)
 }

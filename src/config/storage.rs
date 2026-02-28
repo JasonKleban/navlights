@@ -44,8 +44,8 @@ struct FlashHeader {
 #[derive(Debug)]
 pub enum FlashError {
     Encode,
-    Decode,
-    Read,
+    // Decode,
+    // Read,
     Write,
     Erase,
     Invalid,
@@ -118,25 +118,25 @@ impl FlashStorage {
     }
 
     /// Load `Config` from flash, validate version and CRC
-    pub fn load() -> Option<Config> {
+    pub fn load() -> Result<Option<Config>, FlashError>  {
         let mut sector_buf = [0u8; SECTOR_SIZE];
 
         // Read full sector
         let read_res = unsafe { esp_rom_spiflash_read(config_address(), sector_buf.as_mut_ptr() as *mut _, SECTOR_SIZE as u32) };
         if read_res != 0 {
-            return None;
+            return Ok(None);
         }
 
         // Safety: repr(C) header at start of sector
         let header = unsafe { &*(sector_buf.as_ptr() as *const FlashHeader) };
 
         if header.committed == UNCOMMITTED || header.deadbeef != DEADBEEF || header.version != FLASH_VERSION {
-            return None;
+            return Ok(None);
         }
 
         let payload_len = header.payload_len as usize;
         if payload_len > MAX_PAYLOAD_SIZE {
-            return None;
+            return Ok(None);
         }
 
         let payload_area = &sector_buf[size_of::<FlashHeader>()..size_of::<FlashHeader>() + payload_len];
@@ -145,7 +145,7 @@ impl FlashStorage {
         let mut digest = CRC32.digest();
         digest.update(payload_area);
         if digest.finalize() != header.crc32 {
-            return None;
+            return Ok(None);
         }
 
         // Decode payload with musli using temporary allocator
@@ -153,6 +153,6 @@ impl FlashStorage {
         let alloc = alloc::Slice::new(&mut scratch);
         let cx = context::new_in(&alloc);
 
-        ENCODING.from_slice_with(&cx, payload_area).ok()
+        Ok(ENCODING.from_slice_with(&cx, payload_area).ok())
     }
 }

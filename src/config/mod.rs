@@ -14,7 +14,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load() -> Option<Self> {
+    pub fn load() -> Result<Option<Self>, storage::FlashError> {
         FlashStorage::load()
     }
 
