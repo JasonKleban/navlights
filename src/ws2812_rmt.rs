@@ -14,7 +14,7 @@ impl<'d> Ws2812<'d> {
         let rmt = rmt::Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
 
         // Configure channel 0 for TX
-        let tx_config = TxChannelConfig::default();
+        let tx_config = TxChannelConfig::default().with_clk_divider(1);
 
         let channel = Some(rmt.channel0.configure_tx(pin, tx_config).unwrap());
 
@@ -22,54 +22,40 @@ impl<'d> Ws2812<'d> {
     }
 
     pub fn write(&mut self, pixels: &[[u8; 3]]) {
-        for pixel in pixels {
-            self.write_one(pixel);
-        }
+        let channel = self.channel.take().unwrap();
 
-        self.reset();
-    }
-
-    fn write_one(&mut self, pixel: &[u8; 3]) {
-        // 24 symbols per LED
-        let mut symbols: [PulseCode; 25] =
-            [PulseCode::default(); 25];
+        // Worst case: 64 LEDs → 64*24 = 1536 symbols
+        // That fits in C3 RMT RAM.
+        let mut symbols: [PulseCode; 1536 + 2] =
+            [PulseCode::default(); 1538];
 
         let mut idx = 0;
 
-        // WS2812 expects GRB
-        let bytes = [pixel[1], pixel[0], pixel[2]];
+        for pixel in pixels {
+            let bytes = [pixel[1], pixel[0], pixel[2]];
 
-        for byte in bytes {
-            for bit in (0..8).rev() {
-                let is_one = (byte >> bit) & 1 != 0;
+            for byte in bytes {
+                for bit in (0..8).rev() {
+                    let is_one = (byte >> bit) & 1 != 0;
 
-                symbols[idx] = if is_one {
-                    ws2812_one()
-                } else {
-                    ws2812_zero()
-                };
+                    symbols[idx] = if is_one {
+                        ws2812_one()
+                    } else {
+                        ws2812_zero()
+                    };
 
-                idx += 1;
+                    idx += 1;
+                }
             }
         }
 
-        symbols[24] = PulseCode::end_marker();
+        // Reset pulse (>50µs low)
+        symbols[idx] = PulseCode::new(Level::Low, 4000, Level::Low, 0);
+        idx += 1;
 
-        let channel = self.channel.take().unwrap();
+        symbols[idx] = PulseCode::end_marker();
 
-        let tx = channel.transmit(&symbols).unwrap();
-
-        self.channel = Some(tx.wait().unwrap());
-    }
-
-    fn reset(&mut self) {
-        // >50µs low
-        let reset = [ PulseCode::new(Level::Low, 4000, Level::Low, 0) ];
-
-        let channel = self.channel.take().unwrap();
-
-        let tx = channel.transmit(&reset).unwrap();
-
+        let tx = channel.transmit(&symbols[..=idx]).unwrap();
         self.channel = Some(tx.wait().unwrap());
     }
 }

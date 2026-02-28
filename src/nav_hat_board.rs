@@ -1,5 +1,6 @@
 use embedded_hal::delay::DelayNs;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::time::{Rate};
 use esp_hal::i2c::master as i2c;
 use esp_hal::uart;
@@ -39,6 +40,7 @@ impl<'d> NavHatBoard<'d> {
             .with_tx(peripherals.GPIO21)
             .with_rx(peripherals.GPIO20)
             .split();
+        //let mut pin3 = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
         let neopixels = ws2812_rmt::Ws2812::<'d>::new(peripherals.RMT, peripherals.GPIO3);
 
         return Ok(Self {
