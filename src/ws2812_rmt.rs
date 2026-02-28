@@ -13,7 +13,6 @@ impl<'d> Ws2812<'d> {
     ) -> Self {
         let rmt = rmt::Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
 
-        // Configure channel 0 for TX
         let tx_config = TxChannelConfig::default().with_clk_divider(1);
 
         let channel = Some(rmt.channel0.configure_tx(pin, tx_config).unwrap());
@@ -24,10 +23,7 @@ impl<'d> Ws2812<'d> {
     pub fn write(&mut self, pixels: &[[u8; 3]]) {
         let channel = self.channel.take().unwrap();
 
-        // Worst case: 64 LEDs → 64*24 = 1536 symbols
-        // That fits in C3 RMT RAM.
-        let mut symbols: [PulseCode; 1536 + 2] =
-            [PulseCode::default(); 1538];
+        let mut symbols: [PulseCode; 64*24 + 2] = [PulseCode::default(); 64*24 + 2];
 
         let mut idx = 0;
 
