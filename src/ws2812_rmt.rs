@@ -27,7 +27,7 @@ impl<'d> Ws2812<'d> {
     pub fn write(&mut self, pixels: &[[u8; 3]]) {
         let channel = self.channel.take().unwrap();
 
-        let mut symbols: [PulseCode; 64*24 + 2] = [PulseCode::default(); 64*24 + 2];
+        let mut symbols: [PulseCode; 128*24 + 2] = [PulseCode::default(); 128*24 + 2];
 
         let mut idx = 0;
 

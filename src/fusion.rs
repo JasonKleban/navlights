@@ -32,6 +32,12 @@ pub struct Quaternion {
 }
 
 impl Quaternion {
+    pub fn normalize(&self) -> Self {
+        let norm = (self.w*self.w + self.x*self.x + self.y*self.y + self.z*self.z).sqrt();
+
+        Quaternion { w: self.w / norm, x: self.x / norm, y: self.y / norm, z: self.z / norm }
+    }
+
     pub fn conjugate(self) -> Self {
         Self { w: self.w, x: -self.x, y: -self.y, z: -self.z }
     }
@@ -61,9 +67,8 @@ fn angle_error(target: f32, estimate: f32) -> f32 {
 pub struct Fusion {
     velocity_ned: Vec3,
 
-    yaw_estimate: f32,      // <--- added
-    yaw_bias: f32,
-    mag_bias: f32,
+    yaw_estimate: Option<f32>,      // <--- added
+    yaw_offset: f32,
 
     gps_age: f32,
     imu_age: f32,
@@ -76,9 +81,8 @@ impl Fusion {
     pub fn new() -> Self {
         Self {
             velocity_ned: Vec3::ZERO,
-            yaw_estimate: 0.0,
-            yaw_bias: 0.0,
-            mag_bias: 0.0,
+            yaw_estimate: None,
+            yaw_offset: 0.0,
             gps_age: 1e6,
             imu_age: 1e6,
             mag_declination_radians: 0.0
@@ -118,12 +122,17 @@ impl Fusion {
         let yaw_true = yaw + self.mag_declination_radians;
 
         // Apply bias
-        let yaw_corrected = yaw_true + self.mag_bias;
+        let yaw_corrected = yaw_true + self.yaw_offset;
 
         // Blend into yaw_estimate
         let beta = 0.2 * weight;
-        let delta = angle_error(yaw_corrected, self.yaw_estimate);
-        self.yaw_estimate += beta * delta;
+
+        if let Some(value) = &mut self.yaw_estimate {
+            let delta = angle_error(yaw_corrected, *value);
+            *value += beta * delta;
+        } else {
+            self.yaw_estimate = Some(yaw_true);
+        }
     }
 
     // ------------- GPS UPDATE -------------
@@ -173,13 +182,15 @@ impl Fusion {
         let imu_true = self.corrected_yaw(imu_yaw_rad);
 
         // --- Slow magnetic bias refinement ---
-        self.refine_mag_bias(track_true_rad, imu_true);
+        self.refine_yaw_offset(track_true_rad, imu_true);
 
-        // --- Fast yaw estimate correction ---
-        let delta = angle_error(track_true_rad, self.yaw_estimate);
+        if let Some(value) = &mut self.yaw_estimate {
+            let delta = angle_error(track_true_rad, *value);
+            *value += 0.05 * delta;
 
-        let gain = 0.05;   // surgical constant instead of config
-        self.yaw_estimate += gain * delta;
+        } else {
+            self.yaw_estimate = Some(track_true_rad);
+        }
     }
 
     pub fn update_declination(&mut self, declination_rad: f32) {
@@ -188,7 +199,7 @@ impl Fusion {
           + 0.02 * declination_rad;
     }
 
-    pub fn refine_mag_bias(
+    pub fn refine_yaw_offset(
         &mut self,
         track_true_rad: f32,
         imu_true_yaw: f32,
@@ -196,14 +207,13 @@ impl Fusion {
         let err = angle_error(track_true_rad, imu_true_yaw);
 
         let gamma = 0.005; // slow learning
-        self.mag_bias += gamma * err;
+        self.yaw_offset += gamma * err;
     }
 
     pub fn corrected_yaw(&self, imu_yaw_rad: f32) -> f32 {
         imu_yaw_rad
         + self.mag_declination_radians
-        + self.yaw_bias
-        + self.mag_bias
+        + self.yaw_offset
     }
 
     // ------------- TIME UPDATE -------------
@@ -219,7 +229,7 @@ impl Fusion {
 
     // ------------- OUTPUT -------------
 
-    pub fn yaw(&self) -> f32 {
+    pub fn yaw(&self) -> Option<f32> {
         self.yaw_estimate
     }
 
@@ -234,6 +244,16 @@ impl Fusion {
     ) -> f32 {
         let v_body = q_body_to_ned.conjugate()
             .rotate(self.velocity_ned);
+
+        v_body.y.atan2(v_body.x)
+    }
+
+    pub fn body_relative_north(
+        &self,
+        q_body_to_ned: Quaternion,
+    ) -> f32 {
+        let v_body = q_body_to_ned.conjugate()
+            .rotate(Vec3 { x: 1.0, y: 0.0, z: 0.0 });
 
         v_body.y.atan2(v_body.x)
     }

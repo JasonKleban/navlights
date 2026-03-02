@@ -9,6 +9,7 @@ mod ws2812_rmt;
 
 use esp_println::{print, println};
 use esp_hal::time::Instant;
+use core::f32::consts::PI;
 use core::str::FromStr;
 use fusion::{Fusion, Vec3, Quaternion};
 
@@ -17,10 +18,7 @@ use crate::peripherals::orientation::{ OSensorStatus, CALIBRATION_STATUS_ZERO };
 
 use crate::nav_hat_board::NavHatBoard;
 
-const PIXELS: usize = 64;
-const ARC_START: f32 = -2.094395; // -120 deg
-const ARC_END: f32 =  2.094395;   // +120 deg
-const ARC_SPAN: f32 = ARC_END - ARC_START;
+const PIXELS: usize = 64 + 12;
 
 pub fn program () -> ! {
     let mut delay = esp_hal::delay::Delay::new();
@@ -29,7 +27,7 @@ pub fn program () -> ! {
     let mut nlr: nmea_line_reader::NmeaLineReader = nmea_line_reader::NmeaLineReader::new();
     let mut fusion = Fusion::new();
     let mut last_instant = Instant::now();
-    let mut data : [[u8; 3]; 64] = [[ 0, 0, 0]; 64];
+    let mut data : [[u8; 3]; PIXELS] = [[ 0, 0, 0]; PIXELS];
 
     println!("Initializing BNO055 ...");
     nav_hat_board.setup_bno055(&mut delay).unwrap();
@@ -120,7 +118,7 @@ pub fn program () -> ! {
 
             // Positive values indicate right wing down (roll), nose up (pitch), and nose right (yaw).
             
-            //println!("BNO055 readings:");
+            // println!("BNO055 readings:");
             println!("  orientation: {:>+06.1}° roll, {:>+06.1}° pitch, {:>+06.1}° yaw", 
                 orientation.roll * RADIANS_TO_DEGREES, 
                 orientation.pitch * RADIANS_TO_DEGREES, 
@@ -138,7 +136,7 @@ pub fn program () -> ! {
                 x: quaternion.v.x,
                 y: quaternion.v.y,
                 z: quaternion.v.z,
-            };
+            }.normalize();
 
             let acc = Vec3 {
                 x: linear_acceleration.x,
@@ -158,45 +156,34 @@ pub fn program () -> ! {
 
             let sog = fusion.speed_over_ground();
             let rel_dir = fusion.body_relative_direction(q);
+            let rel_north = fusion.body_relative_north(q);
             let yaw = fusion.yaw();
             let _velocity_ned = fusion.velocity_ned();
 
+            let relative_dir_pixel = (((((-rel_dir as f32 / (2.0 * PI)) * PIXELS as f32) + PIXELS as f32)) as usize) % PIXELS;
+            let relative_north_pixel = (((((-rel_north as f32 / (2.0 * PI)) * PIXELS as f32) + PIXELS as f32)) as usize) % PIXELS;
+
             println!(
-                "Fused: {:>6.2} m/s, rel_dir {:>+6.1}°, {:>+06.1}° yaw",
+                "Fused: {:>6.2} m/s, rel_dir {:>+6.1}° (pixel {}), rel_north {:>+6.1}° (pixel {}), {:>+06.1}° yaw",
                 sog,
                 rel_dir.to_degrees(),
-                yaw * RADIANS_TO_DEGREES + 180.0
+                relative_dir_pixel,
+                rel_north.to_degrees(),
+                relative_north_pixel,
+                yaw.unwrap_or(0.0)
             );
 
-            let mut theta = rel_dir;
-
-            // Clamp to arc
-            if theta < ARC_START { theta = ARC_START; }
-            if theta > ARC_END { theta = ARC_END; }
-
-            let normalized = (theta - ARC_START) / ARC_SPAN;
-
-            let pixel = (normalized * (PIXELS as f32 - 1.0)) as usize;
-
-            if true {
-                data[pixel] = [ 0u8, 50u8, 0u8 ];
-
-                for i in 0..64 {
-                    let dist = (i as i32 - pixel as i32).abs();
-                    if dist < 4 {
-                        let intensity = 50 / (dist as u8 + 1);
-                        data[i] = [ 0u8, intensity, 0u8 ];
-                    } else {
-                        data[i] = [ 0u8, 0u8, 0u8 ];
-                    }
+            for i in 0..PIXELS {
+                match i {
+                    i if i == 7 =>  { data[i] = [ 0u8, 0u8, 255u8 ]; }
+                    i if i == 70 =>  { data[i] = [ 255u8, 0u8, 0u8 ]; }
+                    i if i == relative_dir_pixel && 0.5 < sog =>  { data[i] = [ 0u8, 100u8, 0u8 ]; }
+                    i if i == relative_north_pixel => { data[i] = [ 255u8, 255u8, 255u8 ]; }
+                    _ => { data[i] = [ 0u8, 0u8, 0u8 ]; }
                 }
             }
-
-            // for i in 0..64 {
-            //     data[i] = [ 0u8, 150u8, 0u8 ];
-            // }
-
-            nav_hat_board.neopixels.write(&data);
+            
+            nav_hat_board.neopixels.write(&data[7..70]);
         }
 
         while let Ok(Some(byte)) = nav_hat_board.read_uart_byte() {
@@ -253,6 +240,9 @@ pub fn program () -> ! {
                                             orientation_yaw,
                                             track_rad);
                                     }
+                                // if let (Some(degrees), Some(east_west)) = (mag_offset_degrees, mag_offset_east_west) {
+                                //     println!(" (off {:>+06.1}° {})", 
+                                //         degrees,
                                 }
                             } else {
                                 // println!();
