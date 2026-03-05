@@ -316,16 +316,16 @@ pub fn program() -> ! {
                 + PIXELS as f32 * 1.5) as usize)
                 % PIXELS;
 
-            println!(
-                "Fused: {:>6.2} m/s, rel_dir {:>+6.1}° (pixel {}), rel_north {:>+6.1}° (pixel {}), {:>+06.1}° yaw, {:>4.0} fps",
-                sog,
-                rel_dir.to_degrees(),
-                relative_dir_pixel,
-                rel_north.to_degrees(),
-                relative_north_pixel,
-                yaw.unwrap_or(0.0),
-                fps
-            );
+            // println!(
+            //     "Fused: {:>6.2} m/s, rel_dir {:>+6.1}° (pixel {}), rel_north {:>+6.1}° (pixel {}), {:>+06.1}° yaw, {:>4.0} fps",
+            //     sog,
+            //     rel_dir.to_degrees(),
+            //     relative_dir_pixel,
+            //     rel_north.to_degrees(),
+            //     relative_north_pixel,
+            //     yaw.unwrap_or(0.0),
+            //     fps
+            // );
 
             // 2.0 m/s ~= 4kts
             let nav_width_ratio = (sog / 2.0).clamp(0.0, 1.0);
@@ -333,17 +333,17 @@ pub fn program() -> ! {
             for i in 0..PIXELS {
                 let i_rad = (((i + HALF_PIXELS) % PIXELS) as f32 / PIXELS as f32) * 2.0 * PI;
 
-                let [starboard, _, port] = radial_profile(i_rad, 0.0, 1.0, rel_dir, nav_width_ratio * FRAC_PI_6, 10);
-                let [_, full_aft, _] = radial_profile(i_rad + PI, 0.0, 1.0, rel_dir, nav_width_ratio * FRAC_PI_8, 10);
+                let [starboard, _, port] = radial_profile(i_rad, 0.0, nav_width_ratio, rel_dir, nav_width_ratio * FRAC_PI_6, 10);
+                let [_, full_aft, _] = radial_profile(i_rad + PI, 0.0, nav_width_ratio, rel_dir, nav_width_ratio * FRAC_PI_8, 10);
 
                 match i {
-                    i if 0.1 < starboard => {
+                    i if 0.2 < starboard => {
                         pixel_buffer[i] = GREEN;
                     }
-                    i if 0.1 < port => {
+                    i if 0.2 < port => {
                         pixel_buffer[i] = RED;
                     }
-                    i if 0.1 < full_aft => {
+                    i if 0.2 < full_aft => {
                         pixel_buffer[i] = WHITE;
                     }
                     i if i == relative_north_pixel => {
