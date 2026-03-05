@@ -1,62 +1,6 @@
 use num_traits::float::Float;
 
-#[derive(Copy, Clone, Debug)]
-pub struct Vec3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl Vec3 {
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0, z: 0.0 };
-
-    pub fn norm(&self) -> f32 {
-        (self.x*self.x + self.y*self.y + self.z*self.z).sqrt()
-    }
-
-    pub fn scale(self, k: f32) -> Self {
-        Self { x: self.x*k, y: self.y*k, z: self.z*k }
-    }
-
-    pub fn add(self, o: Self) -> Self {
-        Self { x: self.x+o.x, y: self.y+o.y, z: self.z+o.z }
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct Quaternion {
-    pub w: f32,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl Quaternion {
-    pub fn normalize(&self) -> Self {
-        let norm = (self.w*self.w + self.x*self.x + self.y*self.y + self.z*self.z).sqrt();
-
-        Quaternion { w: self.w / norm, x: self.x / norm, y: self.y / norm, z: self.z / norm }
-    }
-
-    pub fn conjugate(self) -> Self {
-        Self { w: self.w, x: -self.x, y: -self.y, z: -self.z }
-    }
-
-    pub fn rotate(self, v: Vec3) -> Vec3 {
-        let qv = Quaternion { w: 0.0, x: v.x, y: v.y, z: v.z };
-        let r = self.mul(qv).mul(self.conjugate());
-        Vec3 { x: r.x, y: r.y, z: r.z }
-    }
-
-    fn mul(self, o: Self) -> Self {
-        Self {
-            w: self.w*o.w - self.x*o.x - self.y*o.y - self.z*o.z,
-            x: self.w*o.x + self.x*o.w + self.y*o.z - self.z*o.y,
-            y: self.w*o.y - self.x*o.z + self.y*o.w + self.z*o.x,
-            z: self.w*o.z + self.x*o.y - self.y*o.x + self.z*o.w,
-        }
-    }
-}
+use crate::math::{Quaternion, Vec3};
 
 // principal angle using trig periodicity
 fn angle_error(target: f32, estimate: f32) -> f32 {
@@ -67,7 +11,7 @@ fn angle_error(target: f32, estimate: f32) -> f32 {
 pub struct Fusion {
     velocity_ned: Vec3,
 
-    yaw_estimate: Option<f32>,      // <--- added
+    yaw_estimate: Option<f32>,
     yaw_offset: f32,
 
     gps_age: f32,
@@ -77,7 +21,6 @@ pub struct Fusion {
 }
 
 impl Fusion {
-
     pub fn new() -> Self {
         Self {
             velocity_ned: Vec3::ZERO,
@@ -206,7 +149,7 @@ impl Fusion {
     ) {
         let err = angle_error(track_true_rad, imu_true_yaw);
 
-        let gamma = 0.005; // slow learning
+        let gamma = 0.05;
         self.yaw_offset += gamma * err;
     }
 

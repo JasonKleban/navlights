@@ -1,7 +1,6 @@
 use core::mem::{size_of};
 
 use crc::{Crc, CRC_32_ISO_HDLC};
-use esp_println::println;
 use musli::{alloc, context};
 use musli::storage::Encoding;
 

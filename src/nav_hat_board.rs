@@ -5,7 +5,7 @@ use esp_hal::time::{Rate};
 use esp_hal::i2c::master as i2c;
 use esp_hal::uart;
 use esp_hal::rmt;
-use bno055::{Bno055, AxisRemap, BNO055AxisSign};
+use bno055::{AxisRemap, BNO055AxisConfig, BNO055AxisSign, Bno055};
 
 #[derive(Debug)]
 pub enum BoardError {
@@ -58,10 +58,10 @@ impl<'d> NavHatBoard<'d> {
     pub fn setup_bno055(&mut self, mut delay: &mut dyn DelayNs) -> Result<(), BoardError> {
         self.bno055.init(&mut delay).map_err(BoardError::Bno055)?;
 
-        // self.bno055.set_axis_remap(AxisRemap::builder().swap_x_with(BNO055AxisConfig::AXIS_AS_Y).build().unwrap()).map_err(BoardError::Bno055)?;
-        // self.bno055.set_axis_sign(BNO055AxisSign::Y_NEGATIVE).map_err(BoardError::Bno055)?;
-
+        //self.bno055.set_axis_remap(AxisRemap::builder().swap_x_with(BNO055AxisConfig::AXIS_AS_Y).build().unwrap()).map_err(BoardError::Bno055)?;
         self.bno055.set_axis_remap(AxisRemap::builder().build().unwrap()).map_err(BoardError::Bno055)?;
+
+        //self.bno055.set_axis_sign(BNO055AxisSign::Z_NEGATIVE).map_err(BoardError::Bno055)?;
         self.bno055.set_axis_sign(BNO055AxisSign::empty()).map_err(BoardError::Bno055)?;
 
         self.bno055.set_mode(bno055::BNO055OperationMode::NDOF, &mut delay).map_err(BoardError::Bno055)?;

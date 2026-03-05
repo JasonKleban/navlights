@@ -1,4 +1,3 @@
-use bno055::mint;
 use num_traits::float::Float;
 
 pub const KTS_PER_METER_SECOND : f32  = 1.94384;
@@ -11,13 +10,100 @@ pub struct Orientation {
     pub yaw: f32,
 }
 
-pub fn quaternion_to_euler(q: &mint::Quaternion<f32>) -> Orientation {
-    let norm = libm::sqrtf(q.s * q.s + q.v.x * q.v.x + q.v.y * q.v.y + q.v.z * q.v.z);
+#[derive(Copy, Clone, Debug)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
-    let w = q.s / norm;
-    let x = q.v.x / norm;
-    let y = q.v.y / norm;
-    let z = q.v.z / norm;
+impl Vec3 {
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0, z: 0.0 };
+
+    pub fn norm(&self) -> f32 {
+        (self.x*self.x + self.y*self.y + self.z*self.z).sqrt()
+    }
+
+    pub fn scale(self, k: f32) -> Self {
+        Self { x: self.x*k, y: self.y*k, z: self.z*k }
+    }
+
+    pub fn add(self, o: Self) -> Self {
+        Self { x: self.x+o.x, y: self.y+o.y, z: self.z+o.z }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Quaternion {
+    pub w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl Quaternion {
+    pub fn normalize(&self) -> Self {
+        let norm = (self.w*self.w + self.x*self.x + self.y*self.y + self.z*self.z).sqrt();
+
+        Quaternion { w: self.w / norm, x: self.x / norm, y: self.y / norm, z: self.z / norm }
+    }
+
+    pub fn conjugate(self) -> Self {
+        Self { w: self.w, x: -self.x, y: -self.y, z: -self.z }
+    }
+
+    pub fn rotate(self, v: Vec3) -> Vec3 {
+        let qv = Quaternion { w: 0.0, x: v.x, y: v.y, z: v.z };
+        let r = self.mul(qv).mul(self.conjugate());
+        Vec3 { x: r.x, y: r.y, z: r.z }
+    }
+
+    fn mul(self, o: Self) -> Self {
+        Self {
+            w: self.w*o.w - self.x*o.x - self.y*o.y - self.z*o.z,
+            x: self.w*o.x + self.x*o.w + self.y*o.z - self.z*o.y,
+            y: self.w*o.y - self.x*o.z + self.y*o.w + self.z*o.x,
+            z: self.w*o.z + self.x*o.y - self.y*o.x + self.z*o.w,
+        }
+    }
+}
+
+/// Converts a BNO055 quaternion into aviation-style Euler angles.
+///
+/// Assumptions:
+/// - Quaternion rotates sensor/body frame into Earth ENU frame
+///     Earth frame:
+///         X = East
+///         Y = North
+///         Z = Up
+///     Positive yaw is counter-clockwise (right-handed)
+///
+/// - Sensor mounted in BNO055 default orientation:
+///         +X = right
+///         +Y = forward
+///         +Z = up
+///
+/// Output conventions (aviation):
+/// - Roll  (rad): right wing down positive
+/// - Pitch (rad): nose up positive
+/// - Yaw   (rad): 0 = North, increases clockwise, range [0, 2π)
+///
+/// No axis remap or sign inversion should be configured in the BNO055.
+pub fn quaternion_to_euler(q: &Quaternion) -> Orientation {
+    // Normalize quaternion
+    let norm = libm::sqrtf(
+        q.w * q.w +
+        q.x * q.x +
+        q.y * q.y +
+        q.z * q.z
+    );
+
+    let w = q.w / norm;
+    let x = q.x / norm;
+    let y = q.y / norm;
+    let z = q.z / norm;
+
+    // --- Standard Z-Y-X extraction (ENU frame) ---
 
     // Roll (X axis)
     let sinr_cosp = 2.0 * (w * x + y * z);
@@ -32,10 +118,13 @@ pub fn quaternion_to_euler(q: &mint::Quaternion<f32>) -> Orientation {
         sinp.asin()
     };
 
-    // Yaw (Z axis)
-    let siny_cosp = 2.0 * (w * z + x * y);
-    let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
-    let yaw = (siny_cosp).atan2(cosy_cosp);
+    let siny = 2.0 * (w * z + x * y);
+    let cosy = w*w + x*x - y*y - z*z;
+    let yaw = ((siny).atan2(cosy) + 2.0 * core::f32::consts::PI) % (2.0 * core::f32::consts::PI);
 
-    Orientation { roll: roll, pitch: pitch, yaw: yaw }
+    Orientation {
+        roll,
+        pitch,
+        yaw,
+    }
 }

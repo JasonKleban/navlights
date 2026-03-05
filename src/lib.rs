@@ -16,11 +16,10 @@ use core::str::FromStr;
 use esp_hal::{riscv, rmt};
 use esp_hal::time::Instant;
 use esp_println::{print, println};
-use fusion::{Fusion, Quaternion, Vec3};
+use fusion::{Fusion};
 
-use crate::math::{DEGREES_TO_RADIANS, KTS_PER_METER_SECOND, RADIANS_TO_DEGREES};
+use crate::math::{DEGREES_TO_RADIANS, KTS_PER_METER_SECOND, Quaternion, RADIANS_TO_DEGREES, Vec3};
 use crate::peripherals::orientation::{CALIBRATION_STATUS_ZERO, OSensorStatus};
-
 use crate::nav_hat_board::NavHatBoard;
 
 const PERLIN_GRADIENTS_HEIGHT : usize = 16;
@@ -252,38 +251,42 @@ pub fn program() -> ! {
             let linear_acceleration = nav_hat_board.bno055.linear_acceleration().unwrap();
             let quaternion = nav_hat_board.bno055.quaternion().unwrap();
             let temperature = nav_hat_board.bno055.temperature().unwrap();
-            let orientation = math::quaternion_to_euler(&quaternion);
 
-            // Positive values indicate right wing down (roll), nose up (pitch), and nose right (yaw).
-
-            // println!("BNO055 readings:");
-            println!(
-                "  orientation: {:>+06.1}° roll, {:>+06.1}° pitch, {:>+06.1}° yaw",
-                orientation.roll * RADIANS_TO_DEGREES,
-                orientation.pitch * RADIANS_TO_DEGREES,
-                orientation.yaw * RADIANS_TO_DEGREES
-            );
-            println!(
-                "  gravity: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>",
-                gravity.x, gravity.y, gravity.z
-            );
-            println!(
-                "  linear_acceleration: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>",
-                linear_acceleration.x, linear_acceleration.y, linear_acceleration.z
-            );
-            //println!("  mag_data: <{:>+6.2}, {:>+6.2}, {:>+6.2}>", mag_data.x, mag_data.y, mag_data.z);
-            //println!("  quaternion: <{:>+6.2}, {:>+6.2}, {:>+6.2}, {:>+6.2}>", quaternion.v.x, quaternion.v.y, quaternion.v.z, quaternion.s);
-            println!("  temperature: {:.1}°C", temperature);
-
-            let cal = nav_hat_board.bno055.get_calibration_status().unwrap();
-
+            // convert to craft-frame swaping x and y and negating z
             let q = Quaternion {
                 w: quaternion.s,
-                x: quaternion.v.x,
-                y: quaternion.v.y,
-                z: quaternion.v.z,
+                x: quaternion.v.y,
+                y: quaternion.v.x,
+                z: -quaternion.v.z,
             }
             .normalize();
+
+            let orientation = math::quaternion_to_euler(&q);
+
+            // println!("BNO055 readings:");
+            // println!(
+            //     "{:>+06.1}° yaw, {:>+06.1}° pitch, {:>+06.1}° roll, xyzw< {:.8}, {:.8}, {:.8}, {:.8} >",
+            //     orientation.yaw * RADIANS_TO_DEGREES, 
+            //     orientation.pitch * RADIANS_TO_DEGREES,
+            //     orientation.roll * RADIANS_TO_DEGREES,
+            //     q.x, q.y, q.z, q.w
+            // );
+
+            //println!("< {:.8}, {:.8}, {:.8}, {:.8} >", q.x, q.y, q.z, q.w);
+
+            // println!(
+            //     "  gravity: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>",
+            //     gravity.x, gravity.y, gravity.z
+            // );
+            // println!(
+            //     "  linear_acceleration: <{:>+6.2} m/s², {:>+6.2} m/s², {:>+6.2} m/s²>",
+            //     linear_acceleration.x, linear_acceleration.y, linear_acceleration.z
+            // );
+            //println!("  mag_data: <{:>+6.2}, {:>+6.2}, {:>+6.2}>", mag_data.x, mag_data.y, mag_data.z);
+            //println!("  quaternion: <{:>+6.2}, {:>+6.2}, {:>+6.2}, {:>+6.2}>", quaternion.v.x, quaternion.v.y, quaternion.v.z, quaternion.s);
+            //println!("  temperature: {:.1}°C", temperature);
+
+            let cal = nav_hat_board.bno055.get_calibration_status().unwrap();
 
             let acc = Vec3 {
                 x: linear_acceleration.x,
@@ -302,10 +305,10 @@ pub fn program() -> ! {
             let yaw = fusion.yaw();
             let _velocity_ned = fusion.velocity_ned();
 
-            let relative_dir_pixel = ((((-rel_dir as f32 / (2.0 * PI)) * PIXELS as f32)
+            let relative_dir_pixel = ((((rel_dir as f32 / (2.0 * PI)) * PIXELS as f32)
                 + PIXELS as f32) as usize)
                 % PIXELS;
-            let relative_north_pixel = ((((-rel_north as f32 / (2.0 * PI)) * PIXELS as f32)
+            let relative_north_pixel = ((((rel_north as f32 / (2.0 * PI)) * PIXELS as f32)
                 + PIXELS as f32) as usize)
                 % PIXELS;
 
@@ -436,7 +439,7 @@ pub fn program() -> ! {
             }
         }
 
-        //delay.delay_millis(100);
+        //delay.delay_millis(250);
     }
 }
 
