@@ -35,7 +35,7 @@ pub fn quaternion_to_euler(q: &mint::Quaternion<f32>) -> Orientation {
     // Yaw (Z axis)
     let siny_cosp = 2.0 * (w * z + x * y);
     let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
-    let yaw = (siny_cosp).atan2(-cosy_cosp);
+    let yaw = (siny_cosp).atan2(cosy_cosp);
 
     Orientation { roll: roll, pitch: pitch, yaw: yaw }
 }

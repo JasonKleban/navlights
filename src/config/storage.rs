@@ -1,6 +1,7 @@
 use core::mem::{size_of};
 
 use crc::{Crc, CRC_32_ISO_HDLC};
+use esp_println::println;
 use musli::{alloc, context};
 use musli::storage::Encoding;
 
@@ -24,13 +25,13 @@ static UNCOMMITTED: u32 = 0xFFFFFFFF;
 static DEADBEEF: u32 = 0xDEADBEEF;
 
 const SECTOR_SIZE: usize = 4096;         // ESP32-C3 flash sector
-const MAX_PAYLOAD_SIZE: usize = 512;     // largest expected config
+const MAX_PAYLOAD_SIZE: usize = 1024;     // largest expected config
 
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 const ENCODING: Encoding = Encoding::new();
 
 /// Header stored at the beginning of flash for versioning & CRC check
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Copy)]
 struct FlashHeader {
     committed: u32,
@@ -47,6 +48,7 @@ pub enum FlashError {
     // Decode,
     // Read,
     Write,
+    WriteCommitment,
     Erase,
     Invalid,
 }
@@ -103,7 +105,7 @@ impl FlashStorage {
         }
 
         // Write contiguous buffer to flash
-        let write_res = unsafe { esp_rom_spiflash_write(config_address(), sector_buf.as_ptr() as *const _, total_len as u32) };
+        let write_res = unsafe { esp_rom_spiflash_write(config_address(), sector_buf.as_ptr() as *const _, (total_len as u32 + 3) & !3) };
         if write_res != 0 {
             return Err(FlashError::Write);
         }
@@ -111,7 +113,7 @@ impl FlashStorage {
         // Write committment to flash
         let write_res = unsafe { esp_rom_spiflash_write(config_address(), &COMMITTED as *const _, 4u32) };
         if write_res != 0 {
-            return Err(FlashError::Write);
+            return Err(FlashError::WriteCommitment);
         }
 
         Ok(())

@@ -8,20 +8,11 @@
 #![deny(clippy::large_stack_frames)]
 
 use esp_hal::main;
-use esp_println::println;
 use navlights_rs;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!();
-    println!("====================");
-    println!("CRASHED!");
-    println!("{}", info);
-    println!("====================");
-
-    loop {
-        core::hint::spin_loop();
-    }
+    navlights_rs::panic_entry(info);
 }
 
 // This creates a default app-descriptor required by the esp-idf bootloader.

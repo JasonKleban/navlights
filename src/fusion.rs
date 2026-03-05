@@ -131,7 +131,7 @@ impl Fusion {
             let delta = angle_error(yaw_corrected, *value);
             *value += beta * delta;
         } else {
-            self.yaw_estimate = Some(yaw_true);
+            self.yaw_estimate = Some(yaw_corrected);
         }
     }
 

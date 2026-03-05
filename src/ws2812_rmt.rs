@@ -6,22 +6,37 @@ use esp_hal::{
     time::Rate
 };
 
+#[derive(Debug)]
+pub enum Ws2812Error {
+    Error(rmt::Error)
+}
+
+/// Invariants:
+/// - Blocking only
+/// - Does not rely on interrupts
+/// - Does not allocate
+/// - Safe to construct after Peripherals::steal()
 pub struct Ws2812<'d> {
     channel: Option<Channel<'d, Blocking, Tx>>,
 }
 
 impl<'d> Ws2812<'d> {
-    pub fn new(
-        rmt_peripheral: RMT<'d>,
+    pub fn new<C : TxChannelCreator<'d, Blocking>>(
+        rmt_channel : C,
         pin: impl OutputPin + 'd,
-    ) -> Self {
-        let rmt = rmt::Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
-
+    ) -> Result<Self, rmt::Error> {
         let tx_config = TxChannelConfig::default().with_clk_divider(1);
 
-        let channel = Some(rmt.channel0.configure_tx(pin, tx_config).unwrap());
+        let channel = Some(rmt_channel.configure_tx(pin, tx_config)?);
 
-        Self { channel }
+        Ok(Self { channel })
+    }
+
+    pub fn new_for_panic<C : TxChannelCreator<'d, Blocking>>(
+        rmt_channel : C,
+        pin: impl OutputPin + 'd,
+    ) -> Result<Self, rmt::Error> {
+        Self::new(rmt_channel, pin)
     }
 
     pub fn write(&mut self, pixels: &[[u8; 3]]) {

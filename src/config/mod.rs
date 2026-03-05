@@ -4,12 +4,15 @@ mod storage;
 pub use storage::FlashStorage;
 
 use musli::{Encode, Decode};
-use bno055::BNO055Calibration;
+use bno055::{BNO055Calibration};
 
 #[derive(Default, Debug, PartialEq, Encode, Decode)]
+#[repr(C)]
 pub struct Config {
+    pub axis_remap_sign : [u8;4],
     #[musli(with = codec::calibration_option_adapter)]
     pub bno_calibration_profile: Option<BNO055Calibration>,
+
     pub true_offset_deg: Option<f32>,
 }
 
