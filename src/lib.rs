@@ -11,14 +11,14 @@ mod ws2812_rmt;
 use bno055::{AxisRemap, BNO055AxisSign};
 use esp_hal::clock::CpuClock;
 use num_traits::Float;
-use core::f32::consts::PI;
+use core::f32::consts::{FRAC_PI_6, FRAC_PI_8, PI};
 use core::str::FromStr;
 use esp_hal::{riscv, rmt};
 use esp_hal::time::Instant;
 use esp_println::{print, println};
 use fusion::{Fusion};
 
-use crate::math::{DEGREES_TO_RADIANS, KTS_PER_METER_SECOND, Quaternion, RADIANS_TO_DEGREES, Vec3};
+use crate::math::{DEGREES_TO_RADIANS, KTS_PER_METER_SECOND, Quaternion, Vec3};
 use crate::peripherals::orientation::{CALIBRATION_STATUS_ZERO, OSensorStatus};
 use crate::nav_hat_board::NavHatBoard;
 
@@ -26,6 +26,7 @@ const PERLIN_GRADIENTS_HEIGHT : usize = 16;
 const PERLIN_GRADIENTS_WIDTH : usize = 4;
 
 const PIXELS: usize = 64 + 12;
+const HALF_PIXELS: usize = PIXELS / 2;
 const WATER_ANIMATION_DURATION: esp_hal::time::Duration = esp_hal::time::Duration::from_secs(10);
 
 const BLACK: [u8; 3] = [0u8, 0u8, 0u8];
@@ -160,6 +161,9 @@ pub fn program() -> ! {
     }
 
     println!("Beginning program loop ...");
+
+    // fusion.set_debug_velocity_enu(Some(Vec3 { x: -3.0, y: 0.0, z: 0.0 }));
+    // fusion.set_debug_acceleration_enu(Some(Vec3 { x: 0.1, y: 0.0, z: 0.0 }));
 
     loop {
         let mut current_orientation_yaw: Option<f32> = None;
@@ -299,17 +303,17 @@ pub fn program() -> ! {
             current_orientation_yaw = Some(orientation.yaw);
             current_bno055_sys_calibration_score = Some(cal.sys);
 
-            let sog = fusion.speed_over_ground();
+            let sog = fusion.speed();
             let rel_dir = fusion.body_relative_direction(q);
             let rel_north = fusion.body_relative_north(q);
             let yaw = fusion.yaw();
-            let _velocity_ned = fusion.velocity_ned();
 
             let relative_dir_pixel = ((((rel_dir as f32 / (2.0 * PI)) * PIXELS as f32)
-                + PIXELS as f32) as usize)
+                + PIXELS as f32 * 1.5) as usize)
                 % PIXELS;
+
             let relative_north_pixel = ((((rel_north as f32 / (2.0 * PI)) * PIXELS as f32)
-                + PIXELS as f32) as usize)
+                + PIXELS as f32 * 1.5) as usize)
                 % PIXELS;
 
             println!(
@@ -323,13 +327,27 @@ pub fn program() -> ! {
                 fps
             );
 
+            // 2.0 m/s ~= 4kts
+            let nav_width_ratio = (sog / 2.0).clamp(0.0, 1.0);
+
             for i in 0..PIXELS {
+                let i_rad = (((i + HALF_PIXELS) % PIXELS) as f32 / PIXELS as f32) * 2.0 * PI;
+
+                let [starboard, _, port] = radial_profile(i_rad, 0.0, 1.0, rel_dir, nav_width_ratio * FRAC_PI_6, 10);
+                let [_, full_aft, _] = radial_profile(i_rad + PI, 0.0, 1.0, rel_dir, nav_width_ratio * FRAC_PI_8, 10);
+
                 match i {
-                    i if i == relative_dir_pixel && 0.5 < sog => {
-                        pixel_buffer[i] = [0u8, 100u8, 0u8];
+                    i if 0.1 < starboard => {
+                        pixel_buffer[i] = GREEN;
+                    }
+                    i if 0.1 < port => {
+                        pixel_buffer[i] = RED;
+                    }
+                    i if 0.1 < full_aft => {
+                        pixel_buffer[i] = WHITE;
                     }
                     i if i == relative_north_pixel => {
-                        pixel_buffer[i] = [255u8, 255u8, 255u8];
+                        pixel_buffer[i] = dull_color(YELLOW);
                     }
                     _ => {
                         pixel_buffer[i] = WATER_PALETTE[perlin2d.value(water_frame, i as f32 / PIXELS as f32).ceil() as usize];
@@ -464,5 +482,77 @@ pub fn panic_entry(info: &core::panic::PanicInfo) -> ! {
 }
 
 //
-// r\ =\ r_{i}+\frac{\left(r_{o}-r_{i}\right)}{1+\left(\frac{\arctan\left(\sin\left(\theta-T_{peak}\right),\cos\left(\theta-T_{peak}\right)\right)}{T_{width}}\right)^{2n}}
+// r\ =\ r_{i}+\frac{\left(r_{o}-r_{i}\right)}{1+\left(\frac{\arctan\left(\sin\left(\theta-\frac{\pi}{2}+T_{peak}\right),\cos\left(\theta-\frac{\pi}{2}+T_{peak}\right)\right)}{T_{width}}\right)^{2n}}
 //
+fn radial_profile(
+    theta: f32,
+    r_i: f32,
+    r_o: f32,
+    t_peak: f32,
+    t_width: f32,
+    n: u32,
+) -> [ f32 ; 3 ] {
+    let t_width_half = t_width / 2.0;
+
+    let ccw = theta - t_peak - t_width_half;
+    let full = theta - t_peak;
+    let cw = theta - t_peak + t_width_half;
+
+    // principal angle wrap (-π..π]
+    let angle_ccw = libm::atan2f(libm::sinf(ccw), libm::cosf(ccw));
+    let angle_full = libm::atan2f(libm::sinf(full), libm::cosf(full));
+    let angle_cw = libm::atan2f(libm::sinf(cw), libm::cosf(cw));
+
+    let ratio_ccw = angle_ccw / t_width_half;
+    let ratio_full = angle_full / t_width;
+    let ratio_cw = angle_cw / t_width_half;
+
+    let exponent = 2 * n;
+    let shaped_ccw = libm::powf(ratio_ccw, exponent as f32);
+    let shaped_full = libm::powf(ratio_full, exponent as f32);
+    let shaped_cw = libm::powf(ratio_cw, exponent as f32);
+
+    [
+        r_i + (r_o - r_i) / (1.0 + shaped_ccw),
+        r_i + (r_o - r_i) / (1.0 + shaped_full),
+        r_i + (r_o - r_i) / (1.0 + shaped_cw)
+    ]
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        libm::powf((c + 0.055) / 1.055, 2.4)
+    }
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.0031308 {
+        12.92 * c
+    } else {
+        1.055 * libm::powf(c, 1.0 / 2.4) - 0.055
+    }
+}
+
+fn gradient_rgb(
+    a: [f32;3],
+    b: [f32;3],
+    t: f32
+) -> [f32;3] {
+
+    let mut out = [0.0;3];
+
+    let t = t * t * (3.0 - 2.0 * t);
+
+    for i in 0..3 {
+        let la = srgb_to_linear(a[i]);
+        let lb = srgb_to_linear(b[i]);
+
+        let l = la + t * (lb - la);
+
+        out[i] = linear_to_srgb(l);
+    }
+
+    out
+}
