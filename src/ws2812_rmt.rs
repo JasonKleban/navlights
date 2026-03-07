@@ -1,16 +1,8 @@
 use esp_hal::{
     Blocking, 
     gpio::{Level, OutputPin}, 
-    peripherals::RMT, 
-    rmt::{self, Channel, PulseCode, Tx, TxChannelConfig, TxChannelCreator}, 
-    time::Rate
+    rmt::{self, Channel, PulseCode, Tx, TxChannelConfig, TxChannelCreator},
 };
-
-#[derive(Debug)]
-pub enum Ws2812Error {
-    Error(rmt::Error)
-}
-
 /// Invariants:
 /// - Blocking only
 /// - Does not rely on interrupts
@@ -30,13 +22,6 @@ impl<'d> Ws2812<'d> {
         let channel = Some(rmt_channel.configure_tx(pin, tx_config)?);
 
         Ok(Self { channel })
-    }
-
-    pub fn new_for_panic<C : TxChannelCreator<'d, Blocking>>(
-        rmt_channel : C,
-        pin: impl OutputPin + 'd,
-    ) -> Result<Self, rmt::Error> {
-        Self::new(rmt_channel, pin)
     }
 
     pub fn write(&mut self, pixels: &[[u8; 3]]) {

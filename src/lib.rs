@@ -11,7 +11,7 @@ mod ws2812_rmt;
 use bno055::{AxisRemap, BNO055AxisSign};
 use esp_hal::clock::CpuClock;
 use num_traits::Float;
-use core::f32::consts::{FRAC_PI_6, FRAC_PI_8, PI};
+use core::f32::consts::{PI};
 use core::str::FromStr;
 use esp_hal::{riscv, rmt};
 use esp_hal::time::Instant;
@@ -28,6 +28,7 @@ const PERLIN_GRADIENTS_WIDTH : usize = 4;
 const PIXELS: usize = 64 + 12;
 const HALF_PIXELS: usize = PIXELS / 2;
 const WATER_ANIMATION_DURATION: esp_hal::time::Duration = esp_hal::time::Duration::from_secs(10);
+const FULL_SPEED_KTS : f32 = 2.0;
 
 const BLACK: [u8; 3] = [0u8, 0u8, 0u8];
 const WHITE: [u8; 3] = [255u8, 255u8, 255u8];
@@ -63,6 +64,22 @@ const WATER_PALETTE : [ [u8; 3] ; 11 ] = [
     dull_color([0, 0, 0]),
 ];
 
+// Could be computed dynamically but I was getting impatient
+const LIGHTS_PATTERN : [ u8 ; PIXELS] = [
+    0x31, 0x31, 0x32, 0x34, 0x36, 0x37, // 0x3* are white aft lights
+    
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x00 means use the background pattern
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x11, // 0x1* are red port lights
+    0x21, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, // 0x2* are green starboard lights
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+    0x37, 0x36, 0x34, 0x32, 0x31, 0x31, // 0x3* are white aft lights
+];
+
 static mut NEOPIXEL_DRIVER: Option<ws2812_rmt::Ws2812<'static>> = None;
 
 fn neopixel_driver() -> Option<&'static mut ws2812_rmt::Ws2812<'static>> {
@@ -73,11 +90,15 @@ fn neopixel_driver() -> Option<&'static mut ws2812_rmt::Ws2812<'static>> {
 }
 
 pub fn program() -> ! {
+    let mut delay = esp_hal::delay::Delay::new();
+
+    delay.delay_millis(250);
+
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
     let rmt = rmt::Rmt::new(peripherals.RMT, esp_hal::time::Rate::from_mhz(80)).unwrap();
-    let mut neopixels = ws2812_rmt::Ws2812::new(rmt.channel0, peripherals.GPIO3).unwrap();
+    let neopixels = ws2812_rmt::Ws2812::new(rmt.channel0, peripherals.GPIO3).unwrap();
 
     let mut pixel_buffer: [[u8; 3]; PIXELS] = [[0, 0, 0]; PIXELS];
 
@@ -94,7 +115,6 @@ pub fn program() -> ! {
         peripherals.GPIO20
     ).unwrap();
 
-    let mut delay = esp_hal::delay::Delay::new();
     let mut osensor_status = OSensorStatus::Uncalibrated(CALIBRATION_STATUS_ZERO);
     let mut nlr: nmea_line_reader::NmeaLineReader = nmea_line_reader::NmeaLineReader::new();
     let mut fusion = Fusion::new();
@@ -162,8 +182,8 @@ pub fn program() -> ! {
 
     println!("Beginning program loop ...");
 
-    // fusion.set_debug_velocity_enu(Some(Vec3 { x: -3.0, y: 0.0, z: 0.0 }));
-    // fusion.set_debug_acceleration_enu(Some(Vec3 { x: 0.1, y: 0.0, z: 0.0 }));
+    fusion.set_debug_velocity_enu(Some(Vec3 { x: -3.0, y: 0.0, z: 0.0 }));
+    fusion.set_debug_acceleration_enu(Some(Vec3 { x: 0.1, y: 0.0, z: 0.0 }));
 
     loop {
         let mut current_orientation_yaw: Option<f32> = None;
@@ -223,28 +243,14 @@ pub fn program() -> ! {
                 };
 
                 for i in 0..PIXELS {
-                    match i {
-                        i if i == 7 => {
-                            pixel_buffer[i] = BLUE;
-                        }
-                        i if i == 9 => {
-                            pixel_buffer[i] = STATUS_LIGHTS[next_status.sys as usize];
-                        }
-                        i if i == 11 => {
-                            pixel_buffer[i] = STATUS_LIGHTS[next_status.gyr as usize];
-                        }
-                        i if i == 13 => {
-                            pixel_buffer[i] = STATUS_LIGHTS[next_status.acc as usize];
-                        }
-                        i if i == 15 => {
-                            pixel_buffer[i] = STATUS_LIGHTS[next_status.mag as usize];
-                        }
-                        i if i == 70 => {
-                            pixel_buffer[i] = RED;
-                        }
-                        _ => {
-                            pixel_buffer[i] = WATER_PALETTE[perlin2d.value(water_frame, i as f32 / PIXELS as f32).ceil() as usize];
-                        }
+                    pixel_buffer[i] = match i {
+                        i if i == 7 => BLUE,
+                        i if i == 12 => STATUS_LIGHTS[next_status.sys as usize],
+                        i if i == 11 => STATUS_LIGHTS[next_status.gyr as usize],
+                        i if i == 10 => STATUS_LIGHTS[next_status.acc as usize],
+                        i if i == 9 => STATUS_LIGHTS[next_status.mag as usize],
+                        i if i == 70 => RED,
+                        _ => WATER_PALETTE[(WATER_PALETTE.len() as f32 * perlin2d.value(water_frame, i as f32 / PIXELS as f32)).ceil() as usize]
                     }
                 }
 
@@ -303,55 +309,42 @@ pub fn program() -> ! {
             current_orientation_yaw = Some(orientation.yaw);
             current_bno055_sys_calibration_score = Some(cal.sys);
 
-            let sog = fusion.speed();
+            let sog_kts = fusion.speed() * KTS_PER_METER_SECOND;
             let rel_dir = fusion.body_relative_direction(q);
             let rel_north = fusion.body_relative_north(q);
             let yaw = fusion.yaw();
 
-            let relative_dir_pixel = ((((rel_dir as f32 / (2.0 * PI)) * PIXELS as f32)
-                + PIXELS as f32 * 1.5) as usize)
+            let relative_dir_pattern_offset = ((((rel_dir as f32 / (2.0 * PI)) * PIXELS as f32)
+                + PIXELS as f32) as usize)
                 % PIXELS;
 
             let relative_north_pixel = ((((rel_north as f32 / (2.0 * PI)) * PIXELS as f32)
                 + PIXELS as f32 * 1.5) as usize)
                 % PIXELS;
 
-            // println!(
-            //     "Fused: {:>6.2} m/s, rel_dir {:>+6.1}° (pixel {}), rel_north {:>+6.1}° (pixel {}), {:>+06.1}° yaw, {:>4.0} fps",
-            //     sog,
-            //     rel_dir.to_degrees(),
-            //     relative_dir_pixel,
-            //     rel_north.to_degrees(),
-            //     relative_north_pixel,
-            //     yaw.unwrap_or(0.0),
-            //     fps
-            // );
+            let portion_full_speed = (sog_kts / FULL_SPEED_KTS).clamp(0.0, 1.0);
 
-            // 2.0 m/s ~= 4kts
-            let nav_width_ratio = (sog / 2.0).clamp(0.0, 1.0);
+            println!(
+                "Fused: {:>6.2} kts, ({:>3.0}%), rel_dir {:>+6.1}° (pixel {}), rel_north {:>+6.1}° (pixel {}), {:>+06.1}° yaw, {:>4.0} fps",
+                sog_kts,
+                portion_full_speed * 100.0,
+                rel_dir.to_degrees(),
+                relative_dir_pattern_offset,
+                rel_north.to_degrees(),
+                relative_north_pixel,
+                yaw.unwrap_or(0.0),
+                fps
+            );
 
             for i in 0..PIXELS {
-                let i_rad = (((i + HALF_PIXELS) % PIXELS) as f32 / PIXELS as f32) * 2.0 * PI;
+                let pallet_index = LIGHTS_PATTERN[(PIXELS + i - relative_dir_pattern_offset) % PIXELS];
 
-                let [starboard, _, port] = radial_profile(i_rad, 0.0, nav_width_ratio, rel_dir, nav_width_ratio * FRAC_PI_6, 10);
-                let [_, full_aft, _] = radial_profile(i_rad + PI, 0.0, nav_width_ratio, rel_dir, nav_width_ratio * FRAC_PI_8, 10);
-
-                match i {
-                    i if 0.2 < starboard => {
-                        pixel_buffer[i] = GREEN;
-                    }
-                    i if 0.2 < port => {
-                        pixel_buffer[i] = RED;
-                    }
-                    i if 0.2 < full_aft => {
-                        pixel_buffer[i] = WHITE;
-                    }
-                    i if i == relative_north_pixel => {
-                        pixel_buffer[i] = dull_color(YELLOW);
-                    }
-                    _ => {
-                        pixel_buffer[i] = WATER_PALETTE[perlin2d.value(water_frame, i as f32 / PIXELS as f32).ceil() as usize];
-                    }
+                pixel_buffer[i] = match pallet_index & 0xF0 {
+                    0x30 if pallet_index & 0x0F <= (portion_full_speed * 7.0).floor() as u8 => WHITE,
+                    0x10 if pallet_index & 0x0F <= (portion_full_speed * 7.0).floor() as u8 => RED,
+                    0x20 if pallet_index & 0x0F <= (portion_full_speed * 7.0).floor() as u8 => GREEN,
+                    _ if i == relative_north_pixel => dull_color(YELLOW),
+                    _ => WATER_PALETTE[(WATER_PALETTE.len() as f32 * perlin2d.value(water_frame, i as f32 / PIXELS as f32)).ceil() as usize]
                 }
             }
 

@@ -5,15 +5,14 @@ use esp_hal::time::{Rate};
 use esp_hal::i2c::master as i2c;
 use esp_hal::uart;
 use esp_hal::rmt;
-use bno055::{AxisRemap, BNO055AxisConfig, BNO055AxisSign, Bno055};
+use bno055::{AxisRemap, BNO055AxisSign, Bno055};
 
 #[derive(Debug)]
 pub enum BoardError {
     I2cConfig(i2c::ConfigError),
     UartConfig(uart::ConfigError),
     UartRx(uart::RxError),
-    Bno055(bno055::Error<i2c::Error>),
-    RmtError(rmt::Error)
+    Bno055(bno055::Error<i2c::Error>)
 }
 
 pub struct NavHatBoard<'d> {
