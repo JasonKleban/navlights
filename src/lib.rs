@@ -92,10 +92,10 @@ fn neopixel_driver() -> Option<&'static mut ws2812_rmt::Ws2812<'static>> {
 pub fn program() -> ! {
     let mut delay = esp_hal::delay::Delay::new();
 
-    delay.delay_millis(250);
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
+    delay.delay_millis(500);
 
     let rmt = rmt::Rmt::new(peripherals.RMT, esp_hal::time::Rate::from_mhz(80)).unwrap();
     let neopixels = ws2812_rmt::Ws2812::new(rmt.channel0, peripherals.GPIO3).unwrap();
@@ -182,8 +182,8 @@ pub fn program() -> ! {
 
     println!("Beginning program loop ...");
 
-    fusion.set_debug_velocity_enu(Some(Vec3 { x: -3.0, y: 0.0, z: 0.0 }));
-    fusion.set_debug_acceleration_enu(Some(Vec3 { x: 0.1, y: 0.0, z: 0.0 }));
+    // fusion.set_debug_velocity_enu(Some(Vec3 { x: -3.0, y: 0.0, z: 0.0 }));
+    // fusion.set_debug_acceleration_enu(Some(Vec3 { x: 0.1, y: 0.0, z: 0.0 }));
 
     loop {
         let mut current_orientation_yaw: Option<f32> = None;

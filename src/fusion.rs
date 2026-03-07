@@ -20,6 +20,8 @@ pub struct Fusion {
 
     mag_declination_radians: f32,
 
+    filtered_acc: Vec3,
+
     // --- Debug overrides in ENU frame ---
     debug_velocity_enu: Option<Vec3>,      // x=East, y=North, z=Up
     debug_acc_enu: Option<Vec3>,           // x=East, y=North, z=Up
@@ -34,6 +36,7 @@ impl Fusion {
             gps_age: 1e6,
             imu_age: 1e6,
             mag_declination_radians: 0.0,
+            filtered_acc: Vec3::ZERO, 
             debug_velocity_enu: None,
             debug_acc_enu: None,
         }
@@ -72,6 +75,20 @@ impl Fusion {
 
         // Rotate body acceleration into inertial frame (horizontal plane)
         let mut acc_inertial = q_body_to_inertial.rotate(linear_acc_body);
+
+        // --- Low pass filter (IMU smoothing) ---
+        let alpha = 0.85;
+
+        self.filtered_acc.x = self.filtered_acc.x * alpha + acc_inertial.x * (1.0 - alpha);
+        self.filtered_acc.y = self.filtered_acc.y * alpha + acc_inertial.y * (1.0 - alpha);
+        self.filtered_acc.z = self.filtered_acc.z * alpha + acc_inertial.z * (1.0 - alpha);
+
+        acc_inertial = self.filtered_acc;
+
+        let deadband = 0.05;
+
+        if acc_inertial.x.abs() < deadband { acc_inertial.x = 0.0; }
+        if acc_inertial.y.abs() < deadband { acc_inertial.y = 0.0; }
 
         // --- Inject debug acceleration in ENU, converted to body frame ---
         if let Some(acc_enu) = self.debug_acc_enu {
